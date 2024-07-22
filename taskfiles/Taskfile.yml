@@ -1,0 +1,44 @@
+version: '3'
+
+vars:
+  GREETING: Hello, World!
+  SPACER: ===================
+
+env:
+  ROOT_DIR: "{{.PWD}}"
+  ENV: '{{ default "development"  .ENV }}'
+
+# dotenv: ['./.env', './.env.secrets']
+dotenv: ['./.env']
+
+includes:
+
+  app:
+    taskfile: taskfiles/app.Taskfile.yml
+
+  tools:
+    taskfile: taskfiles/tools.Taskfile.yml
+
+
+tasks:
+
+  test:
+    desc: tests environment variables
+    cmds:
+      - echo "{{.PROJECT_NAME}}"
+
+  # docs:
+  #   desc: run docs server at http://127.0.0.1:8000/
+  #   cmds:
+  #     # - pip install mkdocs mkdocs-materialq
+  #     - pipenv install mkdocs mkdocs-material
+  #     - source .env
+  #     - mkdocs serve --open
+  #   aliases: [doc]
+
+  # install_dependencies:
+  #   desc: "Install necessary dependencies using Brew"
+  #   cmds:
+  #     - "arch -arm64 brew bundle"
+  #     - pipenv install --dev
+  #   aliases: [install]

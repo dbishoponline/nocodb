@@ -1,0 +1,27 @@
+- name: Close Ansible Vault
+  hosts: localhost
+  connection: local
+
+  tasks:
+
+    - name: verify vault_password.txt file exists
+      stat:
+        path: ../.vault_password.txt
+      register: pass_file
+
+    - name: "Fail and output message if vault password file doesn't exist"
+      debug:
+        msg: "The .vault_password.txt does not exist. You must add this file to lock/unlock the vault"
+      when: not pass_file.stat.exists
+
+    - name: include stack config
+      include_vars:
+        file: ../stack.yml
+        name: stack_config
+
+    - name: concat array of secret files together
+      ansible.builtin.set_fact:
+        vault_secret_files: "{{ stack_config.vault_secret_files | join(' ') }}"
+
+    - name: close ansible vault
+      shell: "cd .. && ansible-vault encrypt --vault-id prod@./.vault_password.txt {{ vault_secret_files }}"

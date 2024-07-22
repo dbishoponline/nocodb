@@ -1,0 +1,39 @@
+# https://taskfile.dev
+
+version: '3'
+
+vars:
+  ANSIBLE_DEBUG_ENABLED:
+    sh: ([[ "{{.DEBUG}}" == "true" ]] && echo "-vvvv" || echo "")  # ternary for enabling debugging in ansible playbooks
+  ANSIBLE_LOGGING_ENABLED:
+    sh: ([[ "{{.LOGGING}}" == "true" ]] && echo ">> ./logs/vault.log" || echo "")  # ternary for enabling debugging in ansible playbooks
+  ANSIBLE_CONFIG:
+    sh: echo "ANSIBLE_CONFIG=./ansible_pipelining.cfg"
+  VAULT_PASSWORD_FILE: "./.vault_password.txt"
+
+tasks:
+  _:
+    label: "#####"
+    desc: "####################"
+
+  verify-password-exists:
+    desc: Ansible Vault - verify the vault password file exists
+    cmds:
+      - echo "Vault password file exists. Continuing..."
+    preconditions:
+      - sh: '[ -f "{{.VAULT_PASSWORD_FILE}}" ]'
+        msg: "The Vault Password file ({{.VAULT_PASSWORD_FILE}}) doesn't exist. Please add it to unlock the Vault."
+
+  open:
+    desc: Ansible Vault - opens the vault
+    cmds:
+      - task: verify-password-exists
+      - "{{.ANSIBLE_CONFIG}} ansible-playbook {{.ANSIBLE_DEBUG_ENABLED}} ./scripts/vault_open.yaml {{.ANSIBLE_LOGGING_ENABLED}}"
+      - echo "Vault is Open."
+
+  close:
+    desc: Ansible Vault - closes the vault
+    cmds:
+      - task: verify-password-exists
+      - "{{.ANSIBLE_CONFIG}} ansible-playbook {{.ANSIBLE_DEBUG_ENABLED}} ./scripts/vault_close.yaml {{.ANSIBLE_LOGGING_ENABLED}}"
+      - echo "Vault is Closed."

@@ -1,0 +1,16 @@
+version: '3'
+
+tasks:
+
+  test:
+    desc: tests environment variables
+    cmds:
+      - echo "{{.PROJECT_NAME}}"
+
+  start:
+    desc: restart nocodb docker
+    cmds:
+      - docker pull nocodb/nocodb:latest
+      - docker pull postgres:latest
+      - cd ./docker-compose/pg && docker-compose down
+      - cd ./docker-compose/pg && docker-compose up -d
