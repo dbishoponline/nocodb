@@ -1,0 +1,2 @@
+vault_secret_files:
+  - .env.secrets

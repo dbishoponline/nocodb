@@ -13,11 +13,8 @@ dotenv: ['./.env']
 
 includes:
 
-  app:
-    taskfile: taskfiles/app.Taskfile.yml
-
-  tools:
-    taskfile: taskfiles/tools.Taskfile.yml
+  vault:
+    taskfile: taskfiles/vault.Taskfile.yml
 
 
 tasks:
@@ -26,6 +23,14 @@ tasks:
     desc: tests environment variables
     cmds:
       - echo "{{.PROJECT_NAME}}"
+
+  start:
+    desc: restart nocodb docker
+    cmds:
+      - docker pull nocodb/nocodb:latest
+      - docker pull postgres:latest
+      - cd ./docker-compose/pg && docker-compose down
+      - cd ./docker-compose/pg && docker-compose up -d
 
   # docs:
   #   desc: run docs server at http://127.0.0.1:8000/

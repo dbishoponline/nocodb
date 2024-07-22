@@ -1,13 +1,19 @@
 version: '2.1'
 services:
   nocodb:
+    env_file:
+      - ../../../../.env.secrets
     depends_on:
       root_db:
         condition: service_healthy
     environment:
-      NC_DB: "pg://root_db:5433?u=postgres&p=password&d=root_db"
-      NC_ADMIN_EMAIL: hello@dylanbishop.me
-      NC_ADMIN_PASSWORD: guspug-0fyxva-Vigsom
+      NC_DB: ${NC_DB}
+      NC_ADMIN_EMAIL: ${NC_ADMIN_EMAIL}
+      NC_ADMIN_PASSWORD: ${NC_ADMIN_PASSWORD}
+      DB_QUERY_LIMIT_DEFAULT: ${DB_QUERY_LIMIT_DEFAULT}
+      DB_QUERY_LIMIT_GROUP_BY_GROUP: ${DB_QUERY_LIMIT_GROUP_BY_GROUP}
+      DB_QUERY_LIMIT_GROUP_BY_RECORD: ${DB_QUERY_LIMIT_GROUP_BY_RECORD}
+      DB_QUERY_LIMIT_MAX: ${DB_QUERY_LIMIT_MAX}
     image: "nocodb/nocodb:latest"
     ports:
       - "8080:8080"
@@ -16,6 +22,8 @@ services:
       - "nc_data:/usr/app/data"
 
   root_db:
+    env_file:
+      - ../../../../.env.secrets
     environment:
       POSTGRES_DB: root_db
       POSTGRES_PASSWORD: password
