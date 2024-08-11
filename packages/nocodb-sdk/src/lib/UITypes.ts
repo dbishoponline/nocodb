@@ -1,5 +1,6 @@
-import { ColumnReqType, ColumnType } from './Api';
+import { ColumnReqType, ColumnType, TableType } from './Api';
 import { FormulaDataTypes } from './formulaHelpers';
+import { RelationTypes } from '~/lib/globals';
 
 enum UITypes {
   ID = 'ID',
@@ -208,17 +209,25 @@ export function isCreatedOrLastModifiedByCol(
 }
 
 export function isHiddenCol(
-  col: (ColumnReqType | ColumnType) & { system?: number | boolean }
+  col: (ColumnReqType | ColumnType) & {
+    colOptions?: any;
+    system?: number | boolean;
+  },
+  tableMeta: Partial<TableType>
 ) {
-  return (
-    col.system &&
-    (
-      [
-        UITypes.CreatedBy,
-        UITypes.LastModifiedBy,
-        UITypes.LinkToAnotherRecord,
-      ] as string[]
-    ).includes(col.uidt)
+  if (!col.system) return false;
+
+  // hide belongs to column in mm tables only
+  if (col.uidt === UITypes.LinkToAnotherRecord) {
+    if (col.colOptions?.type === RelationTypes.BELONGS_TO && tableMeta?.mm) {
+      return true;
+    }
+    // hide system columns in other tables which are has-many used for mm
+    return col.colOptions?.type === RelationTypes.HAS_MANY;
+  }
+
+  return ([UITypes.CreatedBy, UITypes.LastModifiedBy] as string[]).includes(
+    col.uidt
   );
 }
 
@@ -286,3 +295,26 @@ export const partialUpdateAllowedTypes = [
   UITypes.Email,
   UITypes.URL,
 ];
+
+export const getUITypesForFormulaDataType = (
+  dataType: FormulaDataTypes
+): UITypes[] => {
+  switch (dataType) {
+    case FormulaDataTypes.NUMERIC:
+      return [
+        UITypes.Decimal,
+        UITypes.Currency,
+        UITypes.Percent,
+        UITypes.Rating,
+      ];
+    case FormulaDataTypes.DATE:
+      return [UITypes.DateTime, UITypes.Date, UITypes.Time];
+    case FormulaDataTypes.BOOLEAN:
+    case FormulaDataTypes.COND_EXP:
+      return [UITypes.Checkbox];
+    case FormulaDataTypes.STRING:
+      return [UITypes.Email, UITypes.URL, UITypes.PhoneNumber];
+    default:
+      return [];
+  }
+};

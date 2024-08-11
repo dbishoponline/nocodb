@@ -24,8 +24,8 @@ import {
 } from '~/utils/modelUtils';
 import { JobsRedis } from '~/modules/jobs/redis/jobs-redis';
 import { InstanceCommands } from '~/interface/Jobs';
+import { deepMerge, partialExtract } from '~/utils';
 
-// todo: hide credentials
 export default class Source implements SourceType {
   id?: string;
   fk_workspace_id?: string;
@@ -42,6 +42,9 @@ export default class Source implements SourceType {
   erd_uuid?: string;
   enabled?: BoolType;
   meta?: any;
+  fk_integration_id?: string;
+  integration_config?: string;
+  integration_title?: string;
 
   constructor(source: Partial<SourceType>) {
     Object.assign(this, source);
@@ -74,6 +77,7 @@ export default class Source implements SourceType {
       'meta',
       'is_schema_readonly',
       'is_data_readonly',
+      'fk_integration_id',
     ]);
 
     insertObj.config = CryptoJS.AES.encrypt(
@@ -107,18 +111,17 @@ export default class Source implements SourceType {
     return returnBase;
   }
 
-  public static async updateBase(
+  public static async update(
     context: NcContext,
     sourceId: string,
     source: SourceType & {
-      baseId: string;
       meta?: any;
       deleted?: boolean;
       fk_sql_executor_id?: string;
     },
     ncMeta = Noco.ncMeta,
   ) {
-    const oldSource = await Source.get(context, sourceId, false, ncMeta);
+    const oldSource = await this.get(context, sourceId, false, ncMeta);
 
     if (!oldSource) NcError.sourceNotFound(sourceId);
 
@@ -136,6 +139,7 @@ export default class Source implements SourceType {
       'fk_sql_executor_id',
       'is_schema_readonly',
       'is_data_readonly',
+      'fk_integration_id',
     ]);
 
     if (updateObj.config) {
@@ -157,7 +161,7 @@ export default class Source implements SourceType {
     // if order is missing (possible in old versions), get next order
     if (!oldSource.order && !updateObj.order) {
       updateObj.order = await ncMeta.metaGetNextOrder(MetaTable.BASES, {
-        base_id: source.baseId,
+        base_id: oldSource.base_id,
       });
 
       if (updateObj.order <= 1 && !oldSource.isMeta()) {
@@ -179,7 +183,7 @@ export default class Source implements SourceType {
       // if order is 1 for non-default source, move it to last
       if (oldSource.order <= 1 && !updateObj.order) {
         updateObj.order = await ncMeta.metaGetNextOrder(MetaTable.BASES, {
-          base_id: source.baseId,
+          base_id: oldSource.base_id,
         });
       }
     }
@@ -202,10 +206,7 @@ export default class Source implements SourceType {
       await JobsRedis.emitPrimaryCommand(InstanceCommands.RELEASE, sourceId);
     }
 
-    // call before reorder to update cache
-    const returnBase = await this.get(context, oldSource.id, false, ncMeta);
-
-    return returnBase;
+    return await this.get(context, oldSource.id, false, ncMeta);
   }
 
   static async list(
@@ -214,48 +215,38 @@ export default class Source implements SourceType {
     ncMeta = Noco.ncMeta,
   ): Promise<Source[]> {
     const cachedList = await NocoCache.getList(CacheScope.BASE, [args.baseId]);
-    let { list: baseDataList } = cachedList;
+    let { list: sourceDataList } = cachedList;
     const { isNoneList } = cachedList;
-    if (!isNoneList && !baseDataList.length) {
-      baseDataList = await ncMeta.metaList2(
-        context.workspace_id,
-        context.base_id,
-        MetaTable.BASES,
-        {
-          xcCondition: {
-            _or: [
-              {
-                deleted: {
-                  neq: true,
-                },
-              },
-              {
-                deleted: {
-                  eq: null,
-                },
-              },
-            ],
-          },
-          orderBy: {
-            order: 'asc',
-          },
-        },
-      );
+    if (!isNoneList && !sourceDataList.length) {
+      const qb = ncMeta
+        .knex(MetaTable.BASES)
+        .select(`${MetaTable.BASES}.*`)
+        .where(`${MetaTable.BASES}.base_id`, context.base_id)
+        .where((whereQb) => {
+          whereQb
+            .where(`${MetaTable.BASES}.deleted`, false)
+            .orWhereNull(`${MetaTable.BASES}.deleted`);
+        })
+        .orderBy(`${MetaTable.BASES}.order`, 'asc');
+
+      this.extendQb(qb, context);
+
+      sourceDataList = await qb;
 
       // parse JSON metadata
-      for (const source of baseDataList) {
+      for (const source of sourceDataList) {
         source.meta = parseMetaProp(source, 'meta');
       }
 
-      await NocoCache.setList(CacheScope.BASE, [args.baseId], baseDataList);
+      await NocoCache.setList(CacheScope.BASE, [args.baseId], sourceDataList);
     }
 
-    baseDataList.sort(
+    sourceDataList.sort(
       (a, b) => (a?.order ?? Infinity) - (b?.order ?? Infinity),
     );
 
-    return baseDataList?.map((baseData) => {
-      return this.castType(baseData);
+    return sourceDataList?.map((sourceData) => {
+      return this.castType(sourceData);
     });
   }
 
@@ -265,80 +256,38 @@ export default class Source implements SourceType {
     force = false,
     ncMeta = Noco.ncMeta,
   ): Promise<Source> {
-    let baseData =
+    let sourceData =
       id &&
       (await NocoCache.get(
         `${CacheScope.BASE}:${id}`,
         CacheGetType.TYPE_OBJECT,
       ));
-    if (!baseData) {
-      baseData = await ncMeta.metaGet2(
-        context.workspace_id,
-        context.base_id,
-        MetaTable.BASES,
-        id,
-        null,
-        force
-          ? {}
-          : {
-              _or: [
-                {
-                  deleted: {
-                    neq: true,
-                  },
-                },
-                {
-                  deleted: {
-                    eq: null,
-                  },
-                },
-              ],
-            },
-      );
+    if (!sourceData) {
+      const qb = ncMeta
+        .knex(MetaTable.BASES)
+        .select(`${MetaTable.BASES}.*`)
+        .where(`${MetaTable.BASES}.id`, id)
+        .where(`${MetaTable.BASES}.base_id`, context.base_id);
 
-      if (baseData) {
-        baseData.meta = parseMetaProp(baseData, 'meta');
+      this.extendQb(qb, context);
+
+      if (!force) {
+        qb.where((whereQb) => {
+          whereQb
+            .where(`${MetaTable.BASES}.deleted`, false)
+            .orWhereNull(`${MetaTable.BASES}.deleted`);
+        });
       }
 
-      await NocoCache.set(`${CacheScope.BASE}:${id}`, baseData);
+      sourceData = await qb.first();
+
+      if (sourceData) {
+        sourceData.meta = parseMetaProp(sourceData, 'meta');
+      }
+
+      await NocoCache.set(`${CacheScope.BASE}:${id}`, sourceData);
     }
-    return this.castType(baseData);
-  }
-
-  static async getByUUID(
-    context: NcContext,
-    uuid: string,
-    ncMeta = Noco.ncMeta,
-  ) {
-    const source = await ncMeta.metaGet2(
-      context.workspace_id,
-      context.base_id,
-      MetaTable.BASES,
-      {
-        erd_uuid: uuid,
-      },
-      null,
-      {
-        _or: [
-          {
-            deleted: {
-              neq: true,
-            },
-          },
-          {
-            deleted: {
-              eq: null,
-            },
-          },
-        ],
-      },
-    );
-
-    if (!source) return null;
-
-    delete source.config;
-
-    return this.castType(source);
+    return this.castType(sourceData);
   }
 
   public async getConnectionConfig(): Promise<any> {
@@ -353,7 +302,7 @@ export default class Source implements SourceType {
     return config;
   }
 
-  public getConfig(): any {
+  public getConfig(skipIntegrationConfig = false): any {
     if (this.is_meta) {
       const metaConfig = Noco.getConfig()?.meta?.db;
       const config = { ...metaConfig };
@@ -370,7 +319,34 @@ export default class Source implements SourceType {
       ).toString(CryptoJS.enc.Utf8),
     );
 
-    return config;
+    if (skipIntegrationConfig) {
+      return config;
+    }
+
+    if (!this.integration_config) {
+      return config;
+    }
+
+    const integrationConfig = JSON.parse(
+      CryptoJS.AES.decrypt(
+        this.integration_config,
+        Noco.getConfig()?.auth?.jwt?.secret,
+      ).toString(CryptoJS.enc.Utf8),
+    );
+    // merge integration config with source config
+    // override integration config with source config if exists
+    // only override database and searchPath
+    return deepMerge(
+      integrationConfig,
+      partialExtract(config || {}, [
+        ['connection', 'database'],
+        ['searchPath'],
+      ]),
+    );
+  }
+
+  public getSourceConfig(): any {
+    return this.getConfig(true);
   }
 
   getProject(context: NcContext, ncMeta = Noco.ncMeta): Promise<Base> {
@@ -397,7 +373,7 @@ export default class Source implements SourceType {
       ncMeta,
     );
 
-    if (sources[0].id === this.id && !force) {
+    if ((sources[0].id === this.id || this.isMeta()) && !force) {
       NcError.badRequest('Cannot delete first source');
     }
 
@@ -498,21 +474,17 @@ export default class Source implements SourceType {
     ncMeta = Noco.ncMeta,
     { force }: { force?: boolean } = {},
   ) {
-    const sources = await Source.list(context, { baseId: this.id }, ncMeta);
+    const sources = await Source.list(
+      context,
+      { baseId: this.base_id },
+      ncMeta,
+    );
 
-    if (sources[0].id === this.id && !force) {
+    if ((sources[0].id === this.id || this.isMeta()) && !force) {
       NcError.badRequest('Cannot delete first base');
     }
 
-    await ncMeta.metaUpdate(
-      context.workspace_id,
-      context.base_id,
-      MetaTable.BASES,
-      {
-        deleted: true,
-      },
-      this.id,
-    );
+    await Source.update(context, this.id, { deleted: true }, ncMeta);
 
     await NocoCache.deepDel(
       `${CacheScope.BASE}:${this.id}`,
@@ -582,5 +554,16 @@ export default class Source implements SourceType {
     } else {
       return this.is_meta;
     }
+  }
+
+  protected static extendQb(qb: any, _context: NcContext) {
+    qb.select(
+      `${MetaTable.INTEGRATIONS}.config as integration_config`,
+      `${MetaTable.INTEGRATIONS}.title as integration_title`,
+    ).leftJoin(
+      MetaTable.INTEGRATIONS,
+      `${MetaTable.BASES}.fk_integration_id`,
+      `${MetaTable.INTEGRATIONS}.id`,
+    );
   }
 }

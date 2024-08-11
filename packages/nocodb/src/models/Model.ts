@@ -749,6 +749,16 @@ export default class Model implements TableType {
       tableId,
     );
 
+    // get default view and update alias
+    {
+      const defaultView = await View.getDefaultView(context, tableId, ncMeta);
+      if (defaultView) {
+        await View.update(context, defaultView.id, {
+          title,
+        });
+      }
+    }
+
     await NocoCache.update(`${CacheScope.MODEL}:${tableId}`, {
       title,
       table_name,
@@ -1029,7 +1039,11 @@ export default class Model implements TableType {
 
   static async checkTitleAvailable(
     context: NcContext,
-    { table_name, exclude_id }: { table_name; base_id; source_id; exclude_id? },
+    {
+      table_name,
+      source_id,
+      exclude_id,
+    }: { table_name; base_id; source_id; exclude_id? },
     ncMeta = Noco.ncMeta,
   ) {
     return !(await ncMeta.metaGet2(
@@ -1038,6 +1052,7 @@ export default class Model implements TableType {
       MetaTable.MODELS,
       {
         table_name,
+        ...(source_id ? { source_id } : {}),
       },
       null,
       exclude_id && { id: { neq: exclude_id } },
@@ -1046,7 +1061,11 @@ export default class Model implements TableType {
 
   static async checkAliasAvailable(
     context: NcContext,
-    { title, exclude_id }: { title; base_id; source_id; exclude_id? },
+    {
+      title,
+      source_id,
+      exclude_id,
+    }: { title; base_id; source_id; exclude_id? },
     ncMeta = Noco.ncMeta,
   ) {
     return !(await ncMeta.metaGet2(
@@ -1055,6 +1074,7 @@ export default class Model implements TableType {
       MetaTable.MODELS,
       {
         title,
+        ...(source_id ? { source_id } : {}),
       },
       null,
       exclude_id && { id: { neq: exclude_id } },

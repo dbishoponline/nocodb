@@ -1,7 +1,6 @@
 import type { AttachmentReqType, AttachmentType } from 'nocodb-sdk'
 import { populateUniqueFileName } from 'nocodb-sdk'
 import DOMPurify from 'isomorphic-dompurify'
-import { saveAs } from 'file-saver'
 import RenameFile from './RenameFile.vue'
 import MdiPdfBox from '~icons/mdi/pdf-box'
 import MdiFileWordOutline from '~icons/mdi/file-word-outline'
@@ -11,6 +10,14 @@ import IcOutlineInsertDriveFile from '~icons/ic/outline-insert-drive-file'
 
 export const [useProvideAttachmentCell, useAttachmentCell] = useInjectionState(
   (updateModelValue: (data: string | Record<string, any>[]) => void) => {
+    const { $api } = useNuxtApp()
+
+    const baseURL = $api.instance.defaults.baseURL
+
+    const { row } = useSmartsheetRowStoreOrThrow()
+
+    const { fetchSharedViewAttachment } = useSharedView()
+
     const isReadonly = inject(ReadonlyInj, ref(false))
 
     const { t } = useI18n()
@@ -30,10 +37,16 @@ export const [useProvideAttachmentCell, useAttachmentCell] = useInjectionState(
 
     const attachments = ref<AttachmentType[]>([])
 
+    const modalRendered = ref(false)
+
     const modalVisible = ref(false)
 
     /** for image carousel */
-    const selectedImage = ref()
+    const selectedFile = ref()
+
+    const videoStream = ref<MediaStream | null>(null)
+
+    const permissionGranted = ref(false)
 
     const { base } = storeToRefs(useBase())
 
@@ -43,9 +56,9 @@ export const [useProvideAttachmentCell, useAttachmentCell] = useInjectionState(
       reset: true,
     })
 
-    const { appInfo } = useGlobal()
+    const isRenameModalOpen = ref(false)
 
-    const { getAttachmentSrc } = useAttachment()
+    const { appInfo } = useGlobal()
 
     const defaultAttachmentMeta = {
       ...(appInfo.value.ee && {
@@ -55,6 +68,18 @@ export const [useProvideAttachmentCell, useAttachmentCell] = useInjectionState(
         maxAttachmentSize: Math.max(1, +appInfo.value.ncAttachmentFieldSize || 20) || 20,
         supportedAttachmentMimeTypes: ['*'],
       }),
+    }
+
+    const startCamera = async () => {
+      if (!videoStream.value) {
+        videoStream.value = await navigator.mediaDevices.getUserMedia({ video: true })
+      }
+      permissionGranted.value = true
+    }
+
+    const stopCamera = () => {
+      videoStream.value?.getTracks().forEach((track) => track.stop())
+      videoStream.value = null
     }
 
     /** our currently visible items, either the locally stored or the ones from db, depending on isPublic & isForm status */
@@ -214,34 +239,53 @@ export const [useProvideAttachmentCell, useAttachmentCell] = useInjectionState(
           message.error(e.message || t('msg.error.internalError'))
         }
       } else if (imageUrls.length) {
-        try {
-          const data = await api.storage.uploadByUrl(
-            {
-              path: [NOCO, base.value.id, meta.value?.id, column.value?.id].join('/'),
-            },
-            imageUrls,
-          )
-          newAttachments.push(...data)
-        } catch (e: any) {
-          message.error(e.message || t('msg.error.internalError'))
-        }
+        const data = uploadViaUrl(imageUrls)
+        if (!data) return
+        newAttachments.push(...data)
       }
-
       updateModelValue(JSON.stringify([...attachments.value, ...newAttachments]))
     }
 
-    async function renameFile(attachment: AttachmentType, idx: number) {
+    async function uploadViaUrl(url: AttachmentReqType | AttachmentReqType[], returnError = false) {
+      const imageUrl = Array.isArray(url) ? url : [url]
+      try {
+        const data = await api.storage.uploadByUrl(
+          {
+            path: [NOCO, base.value.id, meta.value?.id, column.value?.id].join('/'),
+          },
+          imageUrl,
+        )
+        return data
+      } catch (e: any) {
+        console.log(e)
+        if (returnError) {
+          return "File couldn't be uploaded. Verify URL & try again."
+        }
+        message.error("File couldn't be uploaded. Verify URL & try again.")
+        return null
+      }
+    }
+
+    async function renameFile(attachment: AttachmentType, idx: number, updateSelectedFile?: boolean) {
       return new Promise<boolean>((resolve) => {
+        isRenameModalOpen.value = true
         const { close } = useDialog(RenameFile, {
           title: attachment.title,
           onRename: (newTitle: string) => {
             attachments.value[idx].title = newTitle
             updateModelValue(JSON.stringify(attachments.value))
             close()
+
+            if (updateSelectedFile) {
+              selectedFile.value = { ...attachment, title: newTitle }
+            }
+
+            isRenameModalOpen.value = false
             resolve(true)
           },
           onCancel: () => {
             close()
+            isRenameModalOpen.value = false
             resolve(true)
           },
         })
@@ -287,16 +331,36 @@ export const [useProvideAttachmentCell, useAttachmentCell] = useInjectionState(
     }
 
     /** bulk download selected files */
-    async function bulkDownloadFiles() {
-      await Promise.all(selectedVisibleItems.value.map(async (v, i) => v && (await downloadFile(visibleItems.value[i]))))
+    async function bulkDownloadAttachments() {
+      await Promise.all(selectedVisibleItems.value.map(async (v, i) => v && (await downloadAttachment(visibleItems.value[i]))))
       selectedVisibleItems.value = Array.from({ length: visibleItems.value.length }, () => false)
     }
 
     /** download a file */
-    async function downloadFile(item: AttachmentType) {
-      const src = await getAttachmentSrc(item)
-      if (src) {
-        saveAs(src, item.title)
+    async function downloadAttachment(item: AttachmentType) {
+      if (!meta.value || !column.value) return
+
+      const modelId = meta.value.id
+      const columnId = column.value.id
+      const rowId = extractPkFromRow(unref(row).row, meta.value.columns!)
+      const src = item.url || item.path
+      if (modelId && columnId && rowId && src) {
+        const apiPromise = isPublic.value
+          ? () => fetchSharedViewAttachment(columnId, rowId, src)
+          : () =>
+              $api.dbDataTableRow.attachmentDownload(modelId, columnId, rowId, {
+                urlOrPath: src,
+              })
+
+        await apiPromise().then((res) => {
+          if (res?.path) {
+            window.open(`${baseURL}/${res.path}`, '_blank')
+          } else if (res?.url) {
+            window.open(res.url, '_blank')
+          } else {
+            message.error('Failed to download file')
+          }
+        })
       } else {
         message.error('Failed to download file')
       }
@@ -353,17 +417,24 @@ export const [useProvideAttachmentCell, useAttachmentCell] = useInjectionState(
       api,
       open: () => open(),
       onDrop,
+      modalRendered,
       modalVisible,
       FileIcon,
       removeFile,
       renameFile,
-      downloadFile,
+      downloadAttachment,
       updateModelValue,
-      selectedImage,
+      selectedFile,
+      uploadViaUrl,
       selectedVisibleItems,
       storedFiles,
-      bulkDownloadFiles,
+      bulkDownloadAttachments,
       defaultAttachmentMeta,
+      startCamera,
+      stopCamera,
+      videoStream,
+      permissionGranted,
+      isRenameModalOpen,
     }
   },
   'useAttachmentCell',

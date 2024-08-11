@@ -12,7 +12,6 @@ import {
   isVirtualCol,
 } from 'nocodb-sdk'
 import { useColumnDrag } from './useColumnDrag'
-import usePaginationShortcuts from './usePaginationShortcuts'
 import { type CellRange, NavigateDir } from '#imports'
 
 const props = defineProps<{
@@ -109,7 +108,7 @@ const reloadViewDataHook = inject(ReloadViewDataHookInj, createEventHook())
 
 const openNewRecordFormHook = inject(OpenNewRecordFormHookInj, createEventHook())
 
-const { isMobileMode } = useGlobal()
+const { isMobileMode, isAddNewRecordGridMode, setAddNewRecordGridMode } = useGlobal()
 
 const scrollParent = inject(ScrollParentInj, ref<undefined>())
 
@@ -129,6 +128,7 @@ const {
   isViewColumnsLoading: _isViewColumnsLoading,
   updateGridViewColumn,
   gridViewCols,
+  metaColumnById,
   resizingColOldWith,
 } = useViewColumnsOrThrow()
 
@@ -181,6 +181,7 @@ const { onDrag, onDragStart, onDragEnd, draggedCol, dragColPlaceholderDomRef, to
 const { onLeft, onRight, onUp, onDown } = usePaginationShortcuts({
   paginationDataRef,
   changePage: changePage as any,
+  isViewDataLoading,
 })
 
 // #Variables
@@ -195,8 +196,6 @@ const disableUrlOverlay = ref(false)
 const preloadColumn = ref<any>()
 
 const scrolling = ref(false)
-
-const isAddNewRecordGridMode = ref(true)
 
 const switchingTab = ref(false)
 
@@ -493,12 +492,12 @@ const onDraftRecordClick = () => {
 }
 
 const onNewRecordToGridClick = () => {
-  isAddNewRecordGridMode.value = true
+  setAddNewRecordGridMode(true)
   addEmptyRow()
 }
 
 const onNewRecordToFormClick = () => {
-  isAddNewRecordGridMode.value = false
+  setAddNewRecordGridMode(false)
   onDraftRecordClick()
 }
 
@@ -1104,12 +1103,33 @@ const saveOrUpdateRecords = async (
 // #Grid Resize
 const onresize = (colID: string | undefined, event: any) => {
   if (!colID) return
-  updateGridViewColumn(colID, { width: event.detail })
+
+  // Set 80px minimum width for attachment cells
+  if (metaColumnById.value[colID].uidt === UITypes.Attachment) {
+    const size = event.detail.split('px')[0]
+    if (+size < 80) {
+      updateGridViewColumn(colID, { width: '80px' })
+    } else {
+      updateGridViewColumn(colID, { width: event.detail })
+    }
+  } else {
+    updateGridViewColumn(colID, { width: event.detail })
+  }
 }
 
 const onXcResizing = (cn: string | undefined, event: any) => {
   if (!cn) return
-  gridViewCols.value[cn].width = `${event.detail}`
+  // Set 80px minimum width for attachment cells
+  if (metaColumnById.value[cn].uidt === UITypes.Attachment) {
+    const size = event.detail.split('px')[0]
+    if (+size < 80) {
+      gridViewCols.value[cn].width = '80px'
+    } else {
+      gridViewCols.value[cn].width = `${event.detail}`
+    }
+  } else {
+    gridViewCols.value[cn].width = `${event.detail}`
+  }
 }
 
 const onXcStartResizing = (cn: string | undefined, event: any) => {
@@ -1910,7 +1930,7 @@ onKeyStroke('ArrowDown', onDown)
                   }"
                 >
                   <div
-                    class="absolute top-0 w-[40px]"
+                    class="absolute top-0 w-45"
                     :class="{
                       'left-[60px]': isAddingColumnAllowed,
                       'left-0': !isAddingColumnAllowed,
@@ -1938,7 +1958,7 @@ onKeyStroke('ArrowDown', onDown)
                 'mobile': isMobileMode,
                 'desktop': !isMobileMode,
                 'w-full': dataRef.length === 0,
-                'pr-60 pb-12': !headerOnly && !isGroupBy,
+                'pb-12': !headerOnly && !isGroupBy,
               }"
               :style="{
                 transform: `translateY(${topOffset}px) translateX(${leftOffset}px)`,
@@ -2268,7 +2288,7 @@ onKeyStroke('ArrowDown', onDown)
               <div v-e="['a:row:copy']" class="flex gap-2 items-center">
                 <GeneralIcon icon="copy" />
                 <!-- Copy -->
-                {{ $t('general.copy') }}
+                {{ $t('general.copy') }} {{ $t('objects.cell').toLowerCase() }}
               </div>
             </NcMenuItem>
 
@@ -2282,7 +2302,7 @@ onKeyStroke('ArrowDown', onDown)
               <div v-e="['a:row:paste']" class="flex gap-2 items-center">
                 <GeneralIcon icon="paste" />
                 <!-- Paste -->
-                {{ $t('general.paste') }}
+                {{ $t('general.paste') }} {{ $t('objects.cell').toLowerCase() }}
               </div>
             </NcMenuItem>
 
@@ -2302,7 +2322,7 @@ onKeyStroke('ArrowDown', onDown)
             >
               <div v-e="['a:row:clear']" class="flex gap-2 items-center">
                 <GeneralIcon icon="close" />
-                {{ $t('general.clear') }}
+                {{ $t('general.clear') }} {{ $t('objects.cell').toLowerCase() }}
               </div>
             </NcMenuItem>
 
@@ -2316,7 +2336,7 @@ onKeyStroke('ArrowDown', onDown)
             >
               <div v-e="['a:row:clear-range']" class="flex gap-2 items-center">
                 <GeneralIcon icon="closeBox" class="text-gray-500" />
-                {{ $t('general.clear') }}
+                {{ $t('general.clear') }} {{ $t('objects.cell').toLowerCase() }}
               </div>
             </NcMenuItem>
 
@@ -2325,7 +2345,7 @@ onKeyStroke('ArrowDown', onDown)
               <NcMenuItem class="nc-base-menu-item" @click="commentRow(contextMenuTarget.row)">
                 <div v-e="['a:row:comment']" class="flex gap-2 items-center">
                   <MdiMessageOutline class="h-4 w-4" />
-                  {{ $t('general.comment') }}
+                  {{ $t('general.add') }} {{ $t('general.comment').toLowerCase() }}
                 </div>
               </NcMenuItem>
             </template>

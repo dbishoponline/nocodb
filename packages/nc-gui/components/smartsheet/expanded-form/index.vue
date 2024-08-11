@@ -30,6 +30,7 @@ interface Props {
   skipReload?: boolean
   newRecordSubmitBtnText?: string
   expandForm?: (row: Row) => void
+  maintainDefaultViewOrder?: boolean
 }
 
 const props = defineProps<Props>()
@@ -48,6 +49,8 @@ const { copy } = useClipboard()
 
 const { isMobileMode } = useGlobal()
 
+const { fieldsMap, isLocalMode } = useViewColumnsOrThrow()
+
 const { t } = useI18n()
 
 const rowId = toRef(props, 'rowId')
@@ -61,6 +64,8 @@ const meta = toRef(props, 'meta')
 const islastRow = toRef(props, 'lastRow')
 
 const isFirstRow = toRef(props, 'firstRow')
+
+const maintainDefaultViewOrder = toRef(props, 'maintainDefaultViewOrder')
 
 const route = useRoute()
 
@@ -97,16 +102,30 @@ const loadingEmit = (event: 'update:modelValue' | 'cancel' | 'next' | 'prev' | '
 
 const fields = computedInject(FieldsInj, (_fields) => {
   if (props.useMetaFields) {
+    if (maintainDefaultViewOrder.value) {
+      return (meta.value.columns ?? [])
+        .filter((col) => !isSystemColumn(col))
+        .sort((a, b) => {
+          return (a.meta?.defaultViewColOrder ?? Infinity) - (b.meta?.defaultViewColOrder ?? Infinity)
+        })
+    }
+
     return (meta.value.columns ?? []).filter((col) => !isSystemColumn(col))
   }
   return _fields?.value ?? []
 })
 
-const displayField = computed(() => meta.value?.columns?.find((c) => c.pv && fields.value.includes(c)) ?? null)
+const displayField = computed(() => meta.value?.columns?.find((c) => c.pv && fields.value?.includes(c)) ?? null)
 
 const hiddenFields = computed(() => {
   // todo: figure out when meta.value is undefined
-  return (meta.value?.columns ?? []).filter((col) => !fields.value?.includes(col)).filter((col) => !isSystemColumn(col))
+  return (meta.value?.columns ?? [])
+    .filter(
+      (col) =>
+        !fields.value?.includes(col) &&
+        (isLocalMode.value && col?.id && fieldsMap.value[col.id] ? fieldsMap.value[col.id]?.initialShow : true),
+    )
+    .filter((col) => !isSystemColumn(col))
 })
 
 const showHiddenFields = ref(false)
@@ -315,7 +334,9 @@ const reloadHook = createEventHook()
 reloadHook.on(() => {
   reloadParentRowHook?.trigger({ shouldShowLoading: false })
   if (isNew.value) return
-  _loadRow(null, true)
+
+  _loadRow(undefined, true)
+  loadAudits(rowId.value, false)
 })
 provide(ReloadRowDataHookInj, reloadHook)
 
@@ -332,7 +353,7 @@ if (isKanban.value) {
 provide(IsExpandedFormOpenInj, isExpanded)
 
 const triggerRowLoad = async (rowId?: string) => {
-  await Promise.allSettled([loadComments(rowId), loadAudits(rowId), _loadRow(rowId)])
+  await Promise.allSettled([loadComments(rowId, false), loadAudits(rowId), _loadRow(rowId)])
   isLoading.value = false
 }
 
@@ -685,7 +706,7 @@ export default {
                 <NcMenuItem class="text-gray-700" @click="_loadRow()">
                   <div v-e="['c:row-expand:reload']" class="flex gap-2 items-center" data-testid="nc-expanded-form-reload">
                     <component :is="iconMap.reload" class="cursor-pointer" />
-                    {{ $t('general.reload') }}
+                    {{ $t('general.reload') }} {{ $t('objects.record') }}
                   </div>
                 </NcMenuItem>
                 <NcMenuItem
@@ -717,7 +738,11 @@ export default {
                   <div v-e="['c:row-expand:delete']" class="flex gap-2 items-center" data-testid="nc-expanded-form-delete">
                     <component :is="iconMap.delete" class="cursor-pointer nc-delete-row" />
                     <span class="-ml-0.25">
-                      {{ $t('activity.deleteRecord') }}
+                      {{
+                        $t('general.deleteEntity', {
+                          entity: $t('objects.record').toLowerCase(),
+                        })
+                      }}
                     </span>
                   </div>
                 </NcMenuItem>
@@ -781,7 +806,7 @@ export default {
                     :ref="i ? null : (el: any) => (cellWrapperEl = el)"
                     class="bg-white flex-1 <lg:w-full px-1 min-h-[37px] flex items-center relative"
                     :class="{
-                      ' !select-text nc-system-field': isReadOnlyVirtualCell(col),
+                      '!select-text nc-system-field': isReadOnlyVirtualCell(col),
                       '!select-text nc-readonly-div-data-cell': readOnly,
                     }"
                   >
@@ -958,7 +983,7 @@ export default {
           :class="{ active: commentsDrawer && isUIAllowed('commentList') }"
           class="nc-comments-drawer border-l-1 relative border-gray-200 bg-gray-50 w-1/3 max-w-[340px] min-w-0 h-full xs:hidden rounded-br-2xl"
         >
-          <SmartsheetExpandedFormComments :primary-key="primaryKey" :loading="isLoading" />
+          <SmartsheetExpandedFormSidebar />
         </div>
       </div>
     </div>
@@ -1041,12 +1066,14 @@ export default {
   @apply !rounded-lg;
   transition: all 0.3s;
 
-  &:not(.nc-readonly-div-data-cell):not(.nc-system-field) {
+  &:not(.nc-readonly-div-data-cell):not(.nc-system-field):not(.nc-attachment-cell) {
     box-shadow: 0px 0px 4px 0px rgba(0, 0, 0, 0.08);
   }
   &:not(:focus-within):hover:not(.nc-readonly-div-data-cell):not(.nc-system-field) {
     @apply !border-1;
-    box-shadow: 0px 0px 4px 0px rgba(0, 0, 0, 0.24);
+    &:not(.nc-attachment-cell) {
+      box-shadow: 0px 0px 4px 0px rgba(0, 0, 0, 0.24);
+    }
   }
 
   &.nc-readonly-div-data-cell,

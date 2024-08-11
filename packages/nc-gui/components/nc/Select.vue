@@ -1,17 +1,25 @@
 <script lang="ts" setup>
-const props = defineProps<{
-  value?: string | string[]
-  placeholder?: string
-  mode?: 'multiple' | 'tags'
-  size?: 'small' | 'middle' | 'large'
-  dropdownClassName?: string
-  showSearch?: boolean
-  // filterOptions is a function
-  filterOption?: (input: string, option: any) => boolean
-  dropdownMatchSelectWidth?: boolean
-  allowClear?: boolean
-  loading?: boolean
-}>()
+import type { iconMap } from '#imports'
+
+const props = withDefaults(
+  defineProps<{
+    value?: string | string[]
+    placeholder?: string
+    mode?: 'multiple' | 'tags'
+    size?: 'small' | 'middle' | 'large'
+    dropdownClassName?: string
+    showSearch?: boolean
+    // filterOptions is a function
+    filterOption?: (input: string, option: any) => boolean
+    dropdownMatchSelectWidth?: boolean
+    allowClear?: boolean
+    loading?: boolean
+    suffixIcon?: keyof typeof iconMap
+  }>(),
+  {
+    suffixIcon: 'arrowDown',
+  },
+)
 
 const emits = defineEmits(['update:value', 'change'])
 
@@ -25,15 +33,7 @@ const dropdownClassName = computed(() => {
   return className
 })
 
-const showSearch = computed(() => props.showSearch)
-
-const filterOption = computed(() => props.filterOption)
-
-const dropdownMatchSelectWidth = computed(() => props.dropdownMatchSelectWidth)
-
-const loading = computed(() => props.loading)
-
-const mode = computed(() => props.mode)
+const { showSearch, filterOption, dropdownMatchSelectWidth, loading, mode } = toRefs(props)
 
 const vModel = useVModel(props, 'value', emits)
 
@@ -60,7 +60,11 @@ const onChange = (value: string) => {
   >
     <template #suffixIcon>
       <GeneralLoader v-if="loading" />
-      <GeneralIcon v-else class="text-gray-800 nc-select-expand-btn" icon="arrowDown" />
+      <GeneralIcon v-else class="text-gray-800 nc-select-expand-btn" :icon="suffixIcon" />
+    </template>
+
+    <template v-if="$slots.dropdownRender" #dropdownRender="{ menuNode }">
+      <slot name="dropdownRender" :menu-node="menuNode" />
     </template>
     <slot />
   </a-select>
@@ -96,6 +100,14 @@ const onChange = (value: string) => {
   }
   .ant-select-selection-item-remove {
     @apply text-gray-800 !pb-1;
+  }
+
+  .ant-select-clear {
+    @apply flex;
+
+    svg {
+      @apply flex-none;
+    }
   }
 }
 .nc-select.ant-select-focused:not(.ant-select-disabled).ant-select:not(.ant-select-customize-input) .ant-select-selector {

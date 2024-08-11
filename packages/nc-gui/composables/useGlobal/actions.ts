@@ -160,6 +160,21 @@ export function useGlobalActions(state: State): Actions {
     state.gridViewPageSize.value = pageSize
   }
 
+  const setLeftSidebarSize = ({ old, current }: { old?: number; current?: number }) => {
+    state.leftSidebarSize.value = {
+      old: old ?? state.leftSidebarSize.value.old,
+      current: current ?? state.leftSidebarSize.value.current,
+    }
+  }
+
+  const setAddNewRecordGridMode = (isGridMode: boolean) => {
+    state.isAddNewRecordGridMode.value = isGridMode
+  }
+
+  const updateSyncDataUpvotes = (upvotes: string[]) => {
+    state.syncDataUpvotes.value = upvotes
+  }
+
   return {
     signIn,
     signOut,
@@ -171,5 +186,8 @@ export function useGlobalActions(state: State): Actions {
     ncNavigateTo,
     getMainUrl,
     setGridViewPageSize,
+    setLeftSidebarSize,
+    setAddNewRecordGridMode,
+    updateSyncDataUpvotes,
   }
 }

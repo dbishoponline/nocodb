@@ -278,6 +278,8 @@ async function onMove(event: any, stackKey: string) {
 }
 
 const kanbanListScrollHandler = useDebounceFn(async (e: any) => {
+  if (!e.target) return
+
   if (e.target.scrollTop + e.target.clientHeight + INFINITY_SCROLL_THRESHOLD >= e.target.scrollHeight) {
     const stackTitle = e.target.getAttribute('data-stack-title')
     const pageSize = appInfo.value.defaultLimit || 25
@@ -627,7 +629,7 @@ const handleSubmitRenameOrNewStack = async (loadMeta: boolean, stack?: any, stac
                               >
                                 <div class="flex gap-2 items-center">
                                   <component :is="iconMap.plus" class="flex-none w-4 h-4" />
-                                  {{ $t('activity.addNewRecord') }}
+                                  {{ $t('activity.newRecord') }}
                                 </div>
                               </NcMenuItem>
                               <NcMenuItem
@@ -785,12 +787,12 @@ const handleSubmitRenameOrNewStack = async (loadMeta: boolean, stack?: any, stac
                                         </template>
 
                                         <template v-for="attachment in attachments(record)">
-                                          <LazyCellAttachmentImage
+                                          <LazyCellAttachmentPreviewImage
                                             v-if="isImage(attachment.title, attachment.mimetype ?? attachment.type)"
                                             :key="attachment.path"
                                             class="h-52"
                                             :class="[`${coverImageObjectFitClass}`]"
-                                            :srcs="getPossibleAttachmentSrc(attachment)"
+                                            :srcs="getPossibleAttachmentSrc(attachment, 'card_cover')"
                                           />
                                         </template>
                                       </a-carousel>
@@ -1112,7 +1114,11 @@ const handleSubmitRenameOrNewStack = async (loadMeta: boolean, stack?: any, stac
               <div v-e="['a:kanban:delete-record']" class="flex items-center gap-2 nc-kanban-context-menu-item">
                 <component :is="iconMap.delete" class="flex" />
                 <!-- Delete Record -->
-                {{ $t('activity.deleteRecord') }}
+                {{
+                  $t('general.deleteEntity', {
+                    entity: $t('objects.record').toLowerCase(),
+                  })
+                }}
               </div>
             </NcMenuItem>
           </NcMenu>

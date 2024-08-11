@@ -28,16 +28,19 @@ export const useColumnDrag = ({
 
     const colIndex = meta.value.columns.findIndex((c) => c.id === columnId)
     if (colIndex !== -1) {
-      meta.value.columns[colIndex].meta = { ...(meta.value.columns[colIndex].meta || {}), defaultViewColOrder: order }
-      meta.value.columns = (meta.value.columns || []).map((c) => {
+      meta.value.columns[colIndex].meta = {
+        ...parseProp((meta.value.columns[colIndex] as ColumnType)?.meta || {}),
+        defaultViewColOrder: order,
+      }
+      meta.value.columns = (meta.value.columns || []).map((c: ColumnType) => {
         if (c.id !== columnId) return c
 
-        c.meta = { ...(c.meta || {}), defaultViewColOrder: order }
+        c.meta = { ...parseProp(c.meta || {}), defaultViewColOrder: order }
         return c
       })
     }
-    if (meta.value.columnsById[columnId]) {
-      meta.value.columnsById[columnId].meta = { ...(meta.value.columnsById[columnId] || {}), defaultViewColOrder: order }
+    if (meta.value?.columnsById?.[columnId]) {
+      meta.value.columnsById[columnId].meta = { ...parseProp(meta.value.columns[colIndex]?.meta), defaultViewColOrder: order }
     }
   }
 
@@ -109,6 +112,8 @@ export const useColumnDrag = ({
   const handleReorderColumn = async () => {
     isProcessing.value = true
     try {
+      if (!dragColPlaceholderDomRef.value) return
+
       dragColPlaceholderDomRef.value!.style.left = '0px'
       dragColPlaceholderDomRef.value!.style.height = '0px'
       await reorderColumn(draggedCol.value!.id!, toBeDroppedColId.value!)
@@ -125,6 +130,8 @@ export const useColumnDrag = ({
     if (!e.dataTransfer) return
 
     const dom = document.querySelector('[data-testid="drag-icon-placeholder"]')
+
+    if (!dom || !dragColPlaceholderDomRef.value) return
 
     e.dataTransfer.dropEffect = 'none'
     e.dataTransfer.effectAllowed = 'none'

@@ -22,6 +22,7 @@ export interface AppInfo {
   oneClick: boolean
   baseHasAdmin: boolean
   teleEnabled: boolean
+  errorReportingEnabled: boolean
   auditEnabled: boolean
   type: string
   version: string
@@ -37,6 +38,7 @@ export interface AppInfo {
   inviteOnlySignup: boolean
   samlAuthEnabled: boolean
   samlProviderName: string | null
+  giftUrl: string
 }
 
 export interface StoredState {
@@ -53,6 +55,13 @@ export interface StoredState {
   isMobileMode: boolean | null
   lastOpenedWorkspaceId: string | null
   gridViewPageSize: number
+  leftSidebarSize: {
+    old: number
+    current: number
+  }
+  isAddNewRecordGridMode: boolean
+  syncDataUpvotes: string[]
+  giftBannerDismissedCount: number
 }
 
 export type State = ToRefs<Omit<StoredState, 'token'>> & {
@@ -89,6 +98,9 @@ export interface Actions {
   getBaseUrl: (workspaceId: string) => string | undefined
   getMainUrl: (workspaceId: string) => string | undefined
   setGridViewPageSize: (pageSize: number) => void
+  setLeftSidebarSize: (params: { old?: number; current?: number }) => void
+  setAddNewRecordGridMode: (isGridMode: boolean) => void
+  updateSyncDataUpvotes: (upvotes: string[]) => void
 }
 
 export type ReadonlyState = Readonly<Pick<State, 'token' | 'user'>> & Omit<State, 'token' | 'user'>

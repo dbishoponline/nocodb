@@ -5,7 +5,7 @@ import type { XcPluginConfig } from 'nc-plugin';
 const config: XcPluginConfig = {
   builder: S3Plugin,
   title: 'S3',
-  version: '0.0.1',
+  version: '0.0.4',
   logo: 'plugins/s3.png',
   description:
     'Amazon Simple Storage Service (Amazon S3) is an object storage service that offers industry-leading scalability, data availability, security, and performance.',
@@ -27,6 +27,13 @@ const config: XcPluginConfig = {
         required: true,
       },
       {
+        key: 'endpoint',
+        label: 'Endpoint',
+        placeholder: 'Endpoint',
+        type: XcType.SingleLineText,
+        required: false,
+      },
+      {
         key: 'access_key',
         label: 'Access Key',
         placeholder: 'Access Key',
@@ -39,6 +46,20 @@ const config: XcPluginConfig = {
         placeholder: 'Access Secret',
         type: XcType.Password,
         required: true,
+      },
+      {
+        key: 'acl',
+        label: 'Access Control Lists (ACL)',
+        placeholder: 'Default set to private',
+        type: XcType.SingleLineText,
+        required: false,
+      },
+      {
+        key: 'force_path_style',
+        label: 'Force Path Style',
+        placeholder: 'Default set to false',
+        type: XcType.Checkbox,
+        required: false,
       },
     ],
     actions: [

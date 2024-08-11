@@ -151,6 +151,9 @@ export enum AppEvents {
   COMMENT_CREATE = 'comment.create',
   COMMENT_DELETE = 'comment.delete',
   COMMENT_UPDATE = 'comment.update',
+  INTEGRATION_DELETE = 'integration.delete',
+  INTEGRATION_CREATE = 'integration.create',
+  INTEGRATION_UPDATE = 'integration.update',
 }
 
 export enum ClickhouseTables {
@@ -327,10 +330,26 @@ export enum APIContext {
   SORTS = 'sorts',
 }
 
-
 export enum SourceRestriction {
   SCHEMA_READONLY = 'is_schema_readonly',
   DATA_READONLY = 'is_data_readonly',
 }
 
+export enum ClientType {
+  MYSQL = 'mysql2',
+  MSSQL = 'mssql',
+  PG = 'pg',
+  SQLITE = 'sqlite3',
+  VITESS = 'vitess',
+  SNOWFLAKE = 'snowflake',
+  DATABRICKS = 'databricks',
+}
 
+export enum SSLUsage {
+  No = 'No',
+  Allowed = 'Allowed',
+  Preferred = 'Preferred',
+  Required = 'Required',
+  RequiredWithCa = 'Required-CA',
+  RequiredWithIdentity = 'Required-Identity',
+}
