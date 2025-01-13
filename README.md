@@ -1,4 +1,31 @@
-<h1 align="center" style="border-bottom: none">
+
+<h1 align="center" style="border-bottom: none">Dylan Bishop</h1>
+
+## Requirements
+
+- Taskfile
+- Ansible Vault
+- Docker
+
+## Start the NocoDB server
+
+```bash
+task start
+```
+
+## Stop the NocoDB server
+
+```bash
+task start
+```
+
+## Upgrade and Restart
+
+```bash
+task upgrade-restart
+```
+
+<h2 align="center" style="border-bottom: none">
     <div>
         <a href="https://www.nocodb.com">
             <img src="/packages/nc-gui/assets/img/icons/512x512.png" width="80" />
@@ -6,8 +33,8 @@
             NocoDB
         </a>
     </div>
-    The Open Source Airtable Alternative <br>
-</h1>
+    The Open Source Airtable Alternative
+</h2>
 
 <p align="center">
 Turns any MySQL, PostgreSQL, SQL Server, SQLite & MariaDB into a smart spreadsheet.
@@ -96,7 +123,7 @@ nocodb/nocodb:latest
   | Linux   | arm64        | `curl http://get.nocodb.com/linux-arm64 -o nocodb -L && chmod +x nocodb && ./nocodb`         |
   | Windows | x64          | `iwr http://get.nocodb.com/win-x64.exe -o Noco-win-x64.exe &&.\Noco-win-x64.exe`             |
   | Windows | arm64        | `iwr http://get.nocodb.com/win-arm64.exe -o Noco-win-arm64.exe && .\Noco-win-arm64.exe`      |
-  
+
 
 ## Docker Compose
 
@@ -129,11 +156,13 @@ Access Dashboard using: [http://localhost:8080/dashboard](http://localhost:8080/
 
 # Table of Contents
 
-- [Quick try](#quick-try)
-    - [Docker](#docker)
-    - [Docker Compose](#docker-compose)
-- [GUI](#gui)
+- [Join Our Team](#join-our-team)
 - [Join Our Community](#join-our-community)
+- [Quick try](#quick-try)
+  - [Docker](#docker)
+  - [Binaries](#binaries)
+  - [Docker Compose](#docker-compose)
+- [GUI](#gui)
 - [Screenshots](#screenshots)
 - [Table of Contents](#table-of-contents)
 - [Features](#features)
@@ -143,7 +172,7 @@ Access Dashboard using: [http://localhost:8080/dashboard](http://localhost:8080/
     - [Sync Schema](#sync-schema)
     - [Audit](#audit)
 - [Production Setup](#production-setup)
-    - [Environment variables](#environment-variables)
+  - [Environment variables](#environment-variables)
 - [Development Setup](#development-setup)
 - [Contributing](#contributing)
 - [Why are we building this?](#why-are-we-building-this)

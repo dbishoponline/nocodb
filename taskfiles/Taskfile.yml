@@ -1,9 +1,5 @@
 version: '3'
 
-vars:
-  GREETING: Hello, World!
-  SPACER: ===================
-
 env:
   ROOT_DIR: "{{.PWD}}"
   ENV: '{{ default "development"  .ENV }}'
@@ -25,11 +21,26 @@ tasks:
       - echo "{{.PROJECT_NAME}}"
 
   start:
-    desc: restart nocodb docker
+    desc: start nocodb docker
+    cmds:
+      - task: restart
+
+  stop:
+    desc: stop nocodb docker
+    cmds:
+      - cd ./docker-compose/pg && docker-compose down
+
+  upgrade-restart:
+    desc: upgrade and restart nocodb docker
     cmds:
       - docker pull nocodb/nocodb:latest
       - docker pull postgres:latest
-      - cd ./docker-compose/pg && docker-compose down
+      - task: restart
+
+  restart:
+    desc: restart nocodb docker
+    cmds:
+      - task: stop
       - cd ./docker-compose/pg && docker-compose up -d
 
   # docs:
