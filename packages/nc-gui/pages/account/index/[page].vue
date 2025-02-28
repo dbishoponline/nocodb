@@ -1,15 +1,11 @@
-<script setup lang="ts">
-const { appInfo } = useGlobal()
-</script>
+<script setup lang="ts"></script>
 
 <template>
   <div>
     <AccountToken v-if="$route.params.page === 'tokens'" />
-    <div v-else-if="$route.params.page === 'audit'" class="h-[calc(100vh_-_4rem)] w-full px-6">
-      <WorkspaceAuditLogs />
-    </div>
+    <AccountSetup v-else-if="$route.params.page === 'setup'" />
     <AccountProfile v-else-if="$route.params.page === 'profile'" />
-    <AccountAppStore v-else-if="$route.params.page === 'apps' && !appInfo.isCloud" />
+    <AccountAppStore v-else-if="$route.params.page === 'apps' && !isEeUI" />
     <span v-else></span>
   </div>
 </template>

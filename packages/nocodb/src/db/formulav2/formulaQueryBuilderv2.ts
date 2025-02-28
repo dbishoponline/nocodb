@@ -1,7 +1,10 @@
 import jsep from 'jsep';
 import {
+  ComparisonOperators,
   FormulaDataTypes,
   jsepCurlyHook,
+  JSEPNode,
+  LongTextAiMetaProp,
   RelationTypes,
   UITypes,
   validateDateWithUnknownFormat,
@@ -10,26 +13,38 @@ import {
 import { Logger } from '@nestjs/common';
 import mapFunctionName from '../mapFunctionName';
 import genRollupSelectv2 from '../genRollupSelectv2';
+import type {
+  CallExpressionNode,
+  ComparisonOperator,
+  IdentifierNode,
+  LiteralNode,
+  ParsedFormulaNode,
+} from 'nocodb-sdk';
+import type {
+  FnParsedTreeNode,
+  FormulaQueryBuilderBaseParams,
+} from './formula-query-builder.types';
 import type RollupColumn from '~/models/RollupColumn';
 import type LinkToAnotherRecordColumn from '~/models/LinkToAnotherRecordColumn';
 import type LookupColumn from '~/models/LookupColumn';
-import type { BaseModelSqlv2 } from '~/db/BaseModelSqlv2';
 import type Column from '~/models/Column';
 import type { User } from '~/models';
+import type { BaseModelSqlv2 } from '~/db/BaseModelSqlv2';
+import type CustomKnex from '~/db/CustomKnex';
 import Model from '~/models/Model';
 import NocoCache from '~/cache/NocoCache';
 import { CacheScope } from '~/utils/globals';
 import { convertDateFormatForConcat } from '~/helpers/formulaFnHelper';
 import FormulaColumn from '~/models/FormulaColumn';
-import { BaseUser } from '~/models';
+import { BaseUser, ButtonColumn } from '~/models';
 import { getRefColumnIfAlias } from '~/helpers';
+import { ExternalTimeout, NcError } from '~/helpers/catchError';
 
 const logger = new Logger('FormulaQueryBuilderv2');
 
-// @ts-ignore
-const getAggregateFn: (fnName: string) => (args: { qb; knex?; cn }) => any = (
-  parentFn,
-) => {
+export const getAggregateFn: (
+  fnName: string,
+) => (args: { qb; knex?: CustomKnex; cn }) => any = (parentFn) => {
   switch (parentFn?.toUpperCase()) {
     case 'MIN':
       return ({ qb, cn }) => qb.clear('select').min(cn);
@@ -59,17 +74,39 @@ const getAggregateFn: (fnName: string) => (args: { qb; knex?; cn }) => any = (
   }
 };
 
-async function _formulaQueryBuilder(params: {
-  baseModelSqlv2: BaseModelSqlv2;
-  _tree;
-  alias;
-  model: Model;
-  aliasToColumn?: Record<string, () => Promise<{ builder: any }>>;
-  tableAlias?: string;
-  parsedTree?: any;
-  column?: Column;
-  baseUsers?: (Partial<User> & BaseUser)[];
-}) {
+async function _formulaQueryBuilder(params: FormulaQueryBuilderBaseParams) {
+  const getLinkedColumnDisplayValue = async (params: {
+    model: Model;
+    aliasToColumn?: Record<string, () => Promise<{ builder: any }>>;
+  }) => {
+    const displayValueColumn = params.model?.displayValue;
+    if (!displayValueColumn) {
+      return undefined;
+    }
+    const formulOption = await params.model.displayValue.getColOptions<
+      FormulaColumn | ButtonColumn
+    >(baseModelSqlv2.context);
+    if (displayValueColumn.uidt !== UITypes.Formula) {
+      return displayValueColumn.column_name;
+    } else {
+      const innerQb = await _formulaQueryBuilder({
+        baseModelSqlv2: await Model.getBaseModelSQL(baseModelSqlv2.context, {
+          model: params.model,
+          dbDriver: baseModelSqlv2.dbDriver,
+        }),
+        _tree: formulOption.formula,
+        alias,
+        model: params.model,
+        column: params.model.displayValue,
+        aliasToColumn: params.aliasToColumn,
+        tableAlias,
+        parsedTree: formulOption.getParsedTree(),
+        baseUsers,
+      });
+      return innerQb;
+    }
+  };
+
   const {
     baseModelSqlv2,
     _tree,
@@ -117,18 +154,29 @@ async function _formulaQueryBuilder(params: {
 
     // populate and save parsedTree to column if not exist
     if (column) {
-      FormulaColumn.update(context, column.id, { parsed_tree: tree }).then(
-        () => {
-          // ignore
-        },
-        (err) => {
-          logger.error(err);
-        },
-      );
+      if (column.uidt === UITypes.Formula) {
+        FormulaColumn.update(context, column.id, { parsed_tree: tree }).then(
+          () => {
+            // ignore
+          },
+          (err) => {
+            logger.error(err);
+          },
+        );
+      } else {
+        ButtonColumn.update(context, column.id, { parsed_tree: tree }).then(
+          () => {
+            // ignore
+          },
+          (err) => {
+            logger.error(err);
+          },
+        );
+      }
     }
   }
 
-  const columnIdToUidt = {};
+  const columnIdToUidt: Record<string, UITypes> = {};
 
   // todo: improve - implement a common solution for filter, sort, formula, etc
   for (const col of columns) {
@@ -136,11 +184,12 @@ async function _formulaQueryBuilder(params: {
     if (col.id in aliasToColumn) continue;
     switch (col.uidt) {
       case UITypes.Formula:
+      case UITypes.Button:
         {
           aliasToColumn[col.id] = async () => {
-            const formulOption = await col.getColOptions<FormulaColumn>(
-              context,
-            );
+            const formulOption = await col.getColOptions<
+              FormulaColumn | ButtonColumn
+            >(context);
             const { builder } = await _formulaQueryBuilder({
               baseModelSqlv2,
               _tree: formulOption.formula,
@@ -621,8 +670,16 @@ async function _formulaQueryBuilder(params: {
 
           let selectQb;
           if (relationType === RelationTypes.BELONGS_TO) {
+            const linkedDisplayValue = await getLinkedColumnDisplayValue({
+              model: parentModel,
+              aliasToColumn: { ...aliasToColumn, [col.id]: null },
+            });
             selectQb = knex(baseModelSqlv2.getTnPath(parentModel.table_name))
-              .select(parentModel?.displayValue?.column_name)
+              .select(
+                typeof linkedDisplayValue === 'string'
+                  ? linkedDisplayValue
+                  : knex.raw(linkedDisplayValue.builder).wrap('(', ')'),
+              )
               .where(
                 `${baseModelSqlv2.getTnPath(parentModel.table_name)}.${
                   parentColumn.column_name
@@ -648,18 +705,23 @@ async function _formulaQueryBuilder(params: {
                   }.${parentColumn.column_name}`,
                 ]),
               );
-
+            const childDisplayValue = await getLinkedColumnDisplayValue({
+              model: childModel,
+              aliasToColumn: { ...aliasToColumn, [col.id]: null },
+            });
             selectQb = (fn) =>
               knex
                 .raw(
                   getAggregateFn(fn)({
                     qb,
                     knex,
-                    cn: childModel?.displayValue?.column_name,
+                    cn:
+                      typeof childDisplayValue === 'string'
+                        ? childDisplayValue
+                        : childDisplayValue.builder,
                   }),
                 )
                 .wrap('(', ')');
-
             // getAggregateFn();
           } else if (relationType == RelationTypes.MANY_TO_MANY) {
             // todo:
@@ -815,6 +877,47 @@ async function _formulaQueryBuilder(params: {
           };
         }
         break;
+      case UITypes.LongText: {
+        if (col.meta?.[LongTextAiMetaProp] === true) {
+          if (knex.clientType() === 'pg') {
+            aliasToColumn[col.id] = async (): Promise<any> => {
+              return {
+                builder: knex.raw(`TRIM('"' FROM (??::jsonb->>'value'))`, [
+                  col.column_name,
+                ]),
+              };
+            };
+          } else if (knex.clientType().startsWith('mysql')) {
+            aliasToColumn[col.id] = async (): Promise<any> => {
+              return {
+                builder: knex.raw(`JSON_UNQUOTE(JSON_EXTRACT(??, '$.value'))`, [
+                  col.column_name,
+                ]),
+              };
+            };
+          } else if (knex.clientType() === 'sqlite3') {
+            aliasToColumn[col.id] = async (): Promise<any> => {
+              return {
+                builder: knex.raw(`json_extract(??, '$.value')`, [
+                  col.column_name,
+                ]),
+              };
+            };
+          } else if (knex.clientType() === 'mssql') {
+            aliasToColumn[col.id] = async (): Promise<any> => {
+              return {
+                builder: knex.raw(`JSON_VALUE(??, '$.value')`, [
+                  col.column_name,
+                ]),
+              };
+            };
+          }
+        } else {
+          aliasToColumn[col.id] = () =>
+            Promise.resolve({ builder: col.column_name });
+        }
+        break;
+      }
       default:
         aliasToColumn[col.id] = () =>
           Promise.resolve({ builder: col.column_name });
@@ -822,19 +925,21 @@ async function _formulaQueryBuilder(params: {
     }
   }
 
-  const fn = async (pt, a?, prevBinaryOp?) => {
+  const fn = async (pt: FnParsedTreeNode, a?: string, prevBinaryOp?) => {
     const colAlias = a ? ` as ${a}` : '';
-    pt.arguments?.forEach?.((arg) => {
-      if (arg.fnName) return;
-      arg.fnName = pt.callee.name.toUpperCase();
-      arg.argsCount = pt.arguments?.length;
-    });
+    if (pt.type === JSEPNode.CALL_EXP) {
+      pt.arguments?.forEach?.((arg: FnParsedTreeNode) => {
+        if (arg.fnName) return;
+        arg.fnName = pt.callee.name.toUpperCase();
+        arg.argsCount = pt.arguments?.length;
+      });
+    }
 
     // if cast is string, then wrap with STRING() function
     if (pt.cast === FormulaDataTypes.STRING) {
       return fn(
         {
-          type: 'CallExpression',
+          type: JSEPNode.CALL_EXP,
           arguments: [{ ...pt, cast: null }],
           callee: {
             type: 'Identifier',
@@ -846,14 +951,14 @@ async function _formulaQueryBuilder(params: {
       );
     }
 
-    if (pt.type === 'CallExpression') {
+    if (pt.type === JSEPNode.CALL_EXP) {
       switch (pt.callee.name.toUpperCase()) {
         case 'ADD':
         case 'SUM':
           if (pt.arguments.length > 1) {
             return fn(
               {
-                type: 'BinaryExpression',
+                type: JSEPNode.BINARY_EXP,
                 operator: '+',
                 left: pt.arguments[0],
                 right: { ...pt, arguments: pt.arguments.slice(1) },
@@ -870,7 +975,7 @@ async function _formulaQueryBuilder(params: {
             if (pt.arguments.length > 1) {
               return fn(
                 {
-                  type: 'BinaryExpression',
+                  type: JSEPNode.BINARY_EXP,
                   operator: '||',
                   left: pt.arguments[0],
                   right: { ...pt, arguments: pt.arguments.slice(1) },
@@ -899,34 +1004,34 @@ async function _formulaQueryBuilder(params: {
         case 'URL':
           return fn(
             {
-              type: 'CallExpression',
+              type: JSEPNode.CALL_EXP,
               arguments: [
                 {
-                  type: 'Literal',
+                  type: JSEPNode.LITERAL,
                   value: 'URI::(',
                   raw: '"URI::("',
                 },
                 pt.arguments[0],
                 {
-                  type: 'Literal',
+                  type: JSEPNode.LITERAL,
                   value: ')',
                   raw: '")"',
                 },
                 ...(pt.arguments[1]
-                  ? [
+                  ? ([
                       {
-                        type: 'Literal',
+                        type: JSEPNode.LITERAL,
                         value: ' LABEL::(',
                         raw: ' LABEL::(',
                       },
                       pt.arguments[1],
                       {
-                        type: 'Literal',
+                        type: JSEPNode.LITERAL,
                         value: ')',
                         raw: ')',
                       },
-                    ]
-                  : []),
+                    ] as ParsedFormulaNode[])
+                  : ([] as ParsedFormulaNode[])),
               ],
               callee: {
                 type: 'Identifier',
@@ -1017,7 +1122,7 @@ async function _formulaQueryBuilder(params: {
       if (pt.operator === '&') {
         return fn(
           {
-            type: 'CallExpression',
+            type: JSEPNode.CALL_EXP,
             arguments: [pt.left, pt.right],
             callee: {
               type: 'Identifier',
@@ -1033,7 +1138,7 @@ async function _formulaQueryBuilder(params: {
       if (pt.operator === '+' && pt.dataType === FormulaDataTypes.STRING) {
         return fn(
           {
-            type: 'CallExpression',
+            type: JSEPNode.CALL_EXP,
             arguments: [pt.left, pt.right],
             callee: {
               type: 'Identifier',
@@ -1054,7 +1159,7 @@ async function _formulaQueryBuilder(params: {
               FormulaDataTypes.NUMERIC
           ) {
             pt[operand === 'left' ? 'right' : 'left'] = {
-              type: 'CallExpression',
+              type: JSEPNode.CALL_EXP,
               arguments: [pt[operand === 'left' ? 'right' : 'left']],
               callee: {
                 type: 'Identifier',
@@ -1064,7 +1169,10 @@ async function _formulaQueryBuilder(params: {
             };
           }
         }
-        if (pt.left.callee?.name !== pt.right.callee?.name) {
+        if (
+          (pt.left as CallExpressionNode).callee?.name !==
+          (pt.right as CallExpressionNode).callee?.name
+        ) {
           // if left/right is BLANK, accept both NULL and empty string
           for (const operand of ['left', 'right']) {
             if (
@@ -1084,7 +1192,7 @@ async function _formulaQueryBuilder(params: {
 
               return fn(
                 {
-                  type: 'CallExpression',
+                  type: JSEPNode.CALL_EXP,
                   arguments: [operand === 'left' ? pt.right : pt.left],
                   callee: {
                     type: 'Identifier',
@@ -1109,7 +1217,7 @@ async function _formulaQueryBuilder(params: {
           )
         ) {
           pt.left = {
-            type: 'CallExpression',
+            type: JSEPNode.CALL_EXP,
             arguments: [pt.left],
             callee: {
               type: 'Identifier',
@@ -1117,7 +1225,7 @@ async function _formulaQueryBuilder(params: {
             },
           };
           pt.right = {
-            type: 'CallExpression',
+            type: JSEPNode.CALL_EXP,
             arguments: [pt.right],
             callee: {
               type: 'Identifier',
@@ -1130,75 +1238,90 @@ async function _formulaQueryBuilder(params: {
       if (pt.operator === '/') {
         pt.left = {
           callee: { name: 'FLOAT' },
-          type: 'CallExpression',
+          type: JSEPNode.CALL_EXP,
           arguments: [pt.left],
         };
         pt.right = {
           callee: { name: 'FLOAT' },
-          type: 'CallExpression',
+          type: JSEPNode.CALL_EXP,
           arguments: [pt.right],
         };
       }
-      pt.left.fnName = pt.left.fnName || 'ARITH';
-      pt.right.fnName = pt.right.fnName || 'ARITH';
+      (pt.left as FnParsedTreeNode).fnName =
+        (pt.left as FnParsedTreeNode).fnName || 'ARITH';
+      (pt.right as FnParsedTreeNode).fnName =
+        (pt.right as FnParsedTreeNode).fnName || 'ARITH';
 
       let left = (await fn(pt.left, null, pt.operator)).builder.toQuery();
       let right = (await fn(pt.right, null, pt.operator)).builder.toQuery();
       let sql = `${left} ${pt.operator} ${right}${colAlias}`;
 
-      // comparing a date with empty string would throw
-      // `ERROR: zero-length delimited identifier` in Postgres
-      if (
-        knex.clientType() === 'pg' &&
-        columnIdToUidt[pt.left.name] === UITypes.Date
-      ) {
-        // The correct way to compare with Date should be using
-        // `IS_AFTER`, `IS_BEFORE`, or `IS_SAME`
-        // This is to prevent empty data returned to UI due to incorrect SQL
-        if (pt.right.value === '') {
-          if (pt.operator === '=') {
-            sql = `${left} IS NULL ${colAlias}`;
-          } else {
+      if (ComparisonOperators.includes(pt.operator as ComparisonOperator)) {
+        // comparing a date with empty string would throw
+        // `ERROR: zero-length delimited identifier` in Postgres
+        if (
+          knex.clientType() === 'pg' &&
+          columnIdToUidt[(pt.left as IdentifierNode).name] === UITypes.Date
+        ) {
+          // The correct way to compare with Date should be using
+          // `IS_AFTER`, `IS_BEFORE`, or `IS_SAME`
+          // This is to prevent empty data returned to UI due to incorrect SQL
+          if ((pt.right as LiteralNode).value === '') {
+            if (pt.operator === '=') {
+              sql = `${left} IS NULL ${colAlias}`;
+            } else {
+              sql = `${left} IS NOT NULL ${colAlias}`;
+            }
+          } else if (
+            !validateDateWithUnknownFormat(
+              (pt.right as LiteralNode).value as string,
+            )
+          ) {
+            // left tree value is date but right tree value is not date
+            // return true if left tree value is not null, else false
             sql = `${left} IS NOT NULL ${colAlias}`;
           }
-        } else if (!validateDateWithUnknownFormat(pt.right.value)) {
-          // left tree value is date but right tree value is not date
-          // return true if left tree value is not null, else false
-          sql = `${left} IS NOT NULL ${colAlias}`;
         }
-      }
-      if (
-        knex.clientType() === 'pg' &&
-        columnIdToUidt[pt.right.name] === UITypes.Date
-      ) {
-        // The correct way to compare with Date should be using
-        // `IS_AFTER`, `IS_BEFORE`, or `IS_SAME`
-        // This is to prevent empty data returned to UI due to incorrect SQL
-        if (pt.left.value === '') {
-          if (pt.operator === '=') {
-            sql = `${right} IS NULL ${colAlias}`;
-          } else {
+        if (
+          knex.clientType() === 'pg' &&
+          columnIdToUidt[(pt.right as IdentifierNode).name] === UITypes.Date
+        ) {
+          // The correct way to compare with Date should be using
+          // `IS_AFTER`, `IS_BEFORE`, or `IS_SAME`
+          // This is to prevent empty data returned to UI due to incorrect SQL
+          if ((pt.left as LiteralNode).value === '') {
+            if (pt.operator === '=') {
+              sql = `${right} IS NULL ${colAlias}`;
+            } else {
+              sql = `${right} IS NOT NULL ${colAlias}`;
+            }
+          } else if (
+            !validateDateWithUnknownFormat(
+              (pt.left as LiteralNode).value as string,
+            )
+          ) {
+            // right tree value is date but left tree value is not date
+            // return true if right tree value is not null, else false
             sql = `${right} IS NOT NULL ${colAlias}`;
           }
-        } else if (!validateDateWithUnknownFormat(pt.left.value)) {
-          // right tree value is date but left tree value is not date
-          // return true if right tree value is not null, else false
-          sql = `${right} IS NOT NULL ${colAlias}`;
         }
       }
 
-      if (pt.left.fnName === 'CONCAT' && knex.clientType() === 'sqlite3') {
+      if (
+        (pt.left as FnParsedTreeNode).fnName === 'CONCAT' &&
+        knex.clientType() === 'sqlite3'
+      ) {
         // handle date format
         left = await convertDateFormatForConcat(
           context,
-          pt.left?.arguments?.[0],
+          (pt.left as CallExpressionNode)?.arguments?.[0],
           columnIdToUidt,
           left,
           knex.clientType(),
         );
         right = await convertDateFormatForConcat(
           context,
-          pt.right?.arguments?.[0],
+          (pt.right as CallExpressionNode)?.arguments?.[0],
           columnIdToUidt,
           right,
           knex.clientType(),
@@ -1212,12 +1335,12 @@ async function _formulaQueryBuilder(params: {
         sql = `IFNULL(${left} ${pt.operator} ${right}, ${
           pt.operator === '='
             ? pt.left.type === 'Literal'
-              ? pt.left.value === ''
-              : pt.right.value === ''
+              ? (pt.left as LiteralNode).value === ''
+              : (pt.right as LiteralNode).value === ''
             : pt.operator === '!='
             ? pt.left.type !== 'Literal'
-              ? pt.left.value === ''
-              : pt.right.value === ''
+              ? (pt.left as any).value === ''
+              : (pt.right as any).value === ''
             : 0
         }) ${colAlias}`;
       } else if (
@@ -1261,7 +1384,8 @@ async function _formulaQueryBuilder(params: {
         pt.dataType === FormulaDataTypes.NUMERIC
       ) {
         query = knex.raw('?', [
-          (pt.operator === '-' ? -1 : 1) * pt.argument.value,
+          (pt.operator === '-' ? -1 : 1) *
+            ((pt.argument as LiteralNode).value as number),
         ]);
       } else {
         query = knex.raw(
@@ -1278,7 +1402,6 @@ async function _formulaQueryBuilder(params: {
     }
   };
   const builder = (await fn(tree, alias)).builder;
-
   return { builder };
 }
 
@@ -1313,7 +1436,7 @@ export default async function formulaQueryBuilderv2(
       parsedTree:
         parsedTree ??
         (await column
-          ?.getColOptions<FormulaColumn>(context)
+          ?.getColOptions<FormulaColumn | ButtonColumn>(context)
           .then((formula) => formula?.getParsedTree())),
       baseUsers,
     });
@@ -1332,12 +1455,20 @@ export default async function formulaQueryBuilderv2(
 
     // if column is provided, i.e. formula has been created
     if (column) {
-      const formula = await column.getColOptions<FormulaColumn>(context);
+      const formula = await column.getColOptions<FormulaColumn | ButtonColumn>(
+        context,
+      );
       // clean the previous formula error if the formula works this time
       if (formula.error) {
-        await FormulaColumn.update(context, column.id, {
-          error: null,
-        });
+        if (formula.constructor.name === 'ButtonColumn') {
+          await ButtonColumn.update(context, column.id, {
+            error: null,
+          });
+        } else {
+          await FormulaColumn.update(context, column.id, {
+            error: null,
+          });
+        }
       }
     }
   } catch (e) {
@@ -1345,16 +1476,27 @@ export default async function formulaQueryBuilderv2(
 
     console.error(e);
     if (column) {
-      // add formula error to show in UI
-      await FormulaColumn.update(context, column.id, {
-        error: e.message,
-      });
-      // update cache to reflect the error in UI
-      await NocoCache.update(`${CacheScope.COL_FORMULA}:${column.id}`, {
-        error: e.message,
-      });
+      if (column?.uidt === UITypes.Button) {
+        await ButtonColumn.update(context, column.id, {
+          error: null,
+        });
+        // update cache to reflect the error in UI
+        await NocoCache.update(`${CacheScope.COL_BUTTON}:${column.id}`, {
+          error: e.message,
+        });
+      } else if (!(e instanceof ExternalTimeout)) {
+        // add formula error to show in UI
+        await FormulaColumn.update(context, column.id, {
+          error: e.message,
+        });
+
+        // update cache to reflect the error in UI
+        await NocoCache.update(`${CacheScope.COL_FORMULA}:${column.id}`, {
+          error: e.message,
+        });
+      }
     }
-    throw new Error(`Formula error: ${e.message}`);
+    NcError.formulaError(e.message);
   }
   return qb;
 }

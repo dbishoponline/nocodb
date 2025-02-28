@@ -4,9 +4,13 @@ import { UITypes, isSystemColumn } from 'nocodb-sdk'
 
 const reloadData = inject(ReloadViewDataHookInj)!
 
-const { meta } = useSmartsheetStoreOrThrow()
-
 const activeView = inject(ActiveViewInj, ref())
+
+const { meta, eventBus } = useSmartsheetStoreOrThrow()
+
+const router = useRouter()
+
+const route = router.currentRoute
 
 const { search, loadFieldQuery } = useFieldQuery()
 
@@ -85,6 +89,20 @@ onClickOutside(globalSearchWrapperRef, (e) => {
 
   showSearchBox.value = false
 })
+
+onMounted(() => {
+  if (search.value.query && !showSearchBox.value) {
+    showSearchBox.value = true
+  }
+})
+
+// on filter param changes reload the data
+watch(
+  () => route.value?.query?.where,
+  () => {
+    eventBus.emit(SmartsheetStoreEvents.DATA_RELOAD)
+  },
+)
 </script>
 
 <template>
@@ -126,6 +144,7 @@ onClickOutside(globalSearchWrapperRef, (e) => {
             :selected-option-id="search.field"
             show-selected-option
             :options="columns"
+            :search-input-placeholder="$t('placeholder.searchFields')"
             toolbar-menu="globalSearch"
             @selected="onSelectOption"
           />
@@ -139,7 +158,7 @@ onClickOutside(globalSearchWrapperRef, (e) => {
           v-model:value="search.query"
           name="globalSearchQuery"
           size="small"
-          class="text-xs w-40 h-full"
+          class="text-xs w-40 h-full nc-view-search-data"
           :placeholder="`${$t('general.searchIn')} ${displayColumnLabel ?? ''}`"
           :bordered="false"
           data-testid="search-data-input"

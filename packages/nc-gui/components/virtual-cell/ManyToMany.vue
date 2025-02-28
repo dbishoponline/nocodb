@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { ColumnType } from 'nocodb-sdk'
-import type { Ref } from 'vue'
+import { type Ref, ref } from 'vue'
+import { forcedNextTick } from '../../utils/browserUtils'
 
 const column = inject(ColumnInj)!
 
@@ -10,7 +11,13 @@ const cellValue = inject(CellValueInj)!
 
 const reloadRowTrigger = inject(ReloadRowDataHookInj, createEventHook())
 
-const isForm = inject(IsFormInj)
+const isForm = inject(IsFormInj, ref(false))
+
+const isExpandedForm = inject(IsExpandedFormOpenInj, ref(false))
+
+const cellClickHook = inject(CellClickHookInj, null)
+
+const onDivDataCellEventHook = inject(OnDivDataCellEventHookInj, null)
 
 const readOnly = inject(ReadonlyInj, ref(false))
 
@@ -24,6 +31,11 @@ const isOpen = ref(false)
 
 const hideBackBtn = ref(false)
 
+const rowHeight = inject(RowHeightInj, ref())
+
+const isCanvasInjected = inject(IsCanvasInjectionInj, false)
+const clientMousePosition = inject(ClientMousePositionInj)
+
 const { isUIAllowed } = useRoles()
 
 const { state, isNew, removeLTARRef } = useSmartsheetRowStoreOrThrow()
@@ -36,6 +48,10 @@ const { relatedTableMeta, loadRelatedTableMeta, relatedTableDisplayValueProp, un
 )
 
 await loadRelatedTableMeta()
+
+const hasEditPermission = computed(() => {
+  return (!readOnly.value && isUIAllowed('dataEdit') && !isUnderLookup.value) || isForm.value
+})
 
 const localCellValue = computed<any[]>(() => {
   if (cellValue?.value) {
@@ -86,7 +102,7 @@ const openChildList = () => {
 }
 
 const openListDlg = () => {
-  if (isUnderLookup.value) return
+  if (!hasEditPermission.value) return
 
   listItemsDlg.value = true
   childListDlg.value = false
@@ -94,7 +110,7 @@ const openListDlg = () => {
   hideBackBtn.value = true
 }
 
-useSelectedCellKeyupListener(inject(ActiveCellInj, ref(false)), (e: KeyboardEvent) => {
+useSelectedCellKeydownListener(inject(ActiveCellInj, ref(false)), (e: KeyboardEvent) => {
   switch (e.key) {
     case 'Enter':
       listItemsDlg.value = true
@@ -122,12 +138,48 @@ watch(
   },
   { flush: 'post' },
 )
+
+const active = inject(ActiveCellInj, ref(false))
+function onCellClick(e: Event) {
+  if (e.type !== 'click') return
+  if (isExpandedForm.value || isForm.value || active.value) {
+    openChildList()
+  }
+}
+
+onMounted(() => {
+  onDivDataCellEventHook?.on(onCellClick)
+  cellClickHook?.on(onCellClick)
+
+  if (isUnderLookup.value || !isCanvasInjected || isExpandedForm.value || !clientMousePosition) return
+
+  forcedNextTick(() => {
+    if (getElementAtMouse('.nc-canvas-table-editable-cell-wrapper .nc-many-to-many-plus-icon', clientMousePosition)) {
+      openListDlg()
+    } else if (getElementAtMouse('.nc-canvas-table-editable-cell-wrapper .nc-many-to-many-maximize-icon', clientMousePosition)) {
+      openChildList()
+    } else if (hasEditPermission.value) {
+      openListDlg()
+    } else {
+      openChildList()
+    }
+  })
+})
+
+onUnmounted(() => {
+  onDivDataCellEventHook?.off(onCellClick)
+  cellClickHook?.off(onCellClick)
+})
 </script>
 
 <template>
   <LazyVirtualCellComponentsLinkRecordDropdown v-model:is-open="isOpen">
     <div class="nc-cell-field flex items-center gap-1 w-full chips-wrapper min-h-4">
-      <div class="chips flex items-center img-container flex-1 hm-items flex-nowrap min-w-0 overflow-hidden">
+      <div
+        class="chips flex items-center img-container flex-1 hm-items min-w-0 overflow-y-auto overflow-x-hidden"
+        :class="{ 'flex-wrap': rowHeight !== 1 }"
+        :style="{ maxHeight: `${rowHeightInPx[rowHeight]}px` }"
+      >
         <template v-if="cells">
           <VirtualCellComponentsItemChip
             v-for="(cell, i) of cells"
@@ -135,7 +187,8 @@ watch(
             :item="cell.item"
             :value="cell.value"
             :column="m2mColumn"
-            :show-unlink-button="true"
+            :show-unlink-button="false"
+            :truncate="false"
             @unlink="unlinkRef(cell.item)"
           />
 
@@ -143,19 +196,24 @@ watch(
         </template>
       </div>
 
-      <div v-if="!isUnderLookup || isForm" class="flex justify-end gap-1 min-h-4 items-center">
-        <GeneralIcon
-          icon="expand"
-          class="text-sm nc-action-icon text-gray-500/50 hover:text-gray-500 nc-arrow-expand"
-          @click.stop="openChildList"
-        />
-
-        <GeneralIcon
-          v-if="!readOnly && isUIAllowed('dataEdit')"
-          icon="plus"
-          class="text-sm nc-action-icon text-gray-500/50 hover:text-gray-500 nc-plus"
+      <div
+        v-if="!isUnderLookup || isForm"
+        class="flex justify-end gap-[2px] min-h-4 items-center absolute right-1 top-[3px] many-to-many-actions"
+        :class="{ active }"
+        @click.stop
+      >
+        <NcButton
+          v-if="hasEditPermission"
+          size="xsmall"
+          type="secondary"
+          class="nc-action-icon nc-many-to-many-plus-icon"
           @click.stop="openListDlg"
-        />
+        >
+          <GeneralIcon icon="plus" class="text-sm nc-plus" />
+        </NcButton>
+        <NcButton size="xsmall" type="secondary" class="nc-action-icon nc-many-to-many-maximize-icon" @click.stop="openChildList">
+          <GeneralIcon icon="maximize" />
+        </NcButton>
       </div>
     </div>
 
@@ -166,6 +224,7 @@ watch(
         :cell-value="localCellValue"
         :column="m2mColumn"
         @attach-record="onAttachRecord"
+        @escape="isOpen = false"
       />
       <LazyVirtualCellComponentsUnLinkedItems
         v-if="listItemsDlg"
@@ -173,17 +232,36 @@ watch(
         :column="m2mColumn"
         :hide-back-btn="hideBackBtn"
         @attach-linked-record="onAttachLinkedRecord"
+        @escape="isOpen = false"
       />
     </template>
   </LazyVirtualCellComponentsLinkRecordDropdown>
 </template>
 
 <style scoped>
-.nc-action-icon {
-  @apply hidden cursor-pointer;
+.many-to-many-actions {
+  @apply hidden;
 }
 
-.chips-wrapper:hover .nc-action-icon {
-  @apply inline-block;
+.many-to-many-actions.active,
+.chips-wrapper:hover .many-to-many-actions {
+  @apply flex;
+}
+</style>
+
+<style lang="scss">
+.nc-default-value-wrapper,
+.nc-expanded-cell,
+.ant-form-item-control-input {
+  .many-to-many-actions {
+    @apply !flex;
+  }
+}
+.ant-form-item-control-input .many-to-many-actions {
+  @apply top-[7px] right-[5px];
+}
+
+.nc-expanded-cell .many-to-many-actions {
+  @apply top-[2px] right-[5px];
 }
 </style>

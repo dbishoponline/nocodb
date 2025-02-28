@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { ColumnType } from 'nocodb-sdk'
-import type { Ref } from 'vue'
+import { type Ref, ref } from 'vue'
+import { forcedNextTick } from '../../utils/browserUtils'
 
 const column = inject(ColumnInj)!
 
@@ -18,6 +19,16 @@ const isForm = inject(IsFormInj, ref(false))
 
 const isUnderLookup = inject(IsUnderLookupInj, ref(false))
 
+const isCanvasInjected = inject(IsCanvasInjectionInj, false)
+
+const clientMousePosition = inject(ClientMousePositionInj)
+
+const isExpandedFormOpen = inject(IsExpandedFormOpenInj, ref(false))
+
+const cellClickHook = inject(CellClickHookInj, null)
+
+const onDivDataCellEventHook = inject(OnDivDataCellEventHookInj, null)
+
 const { isUIAllowed } = useRoles()
 
 const listItemsDlg = ref(false)
@@ -30,6 +41,10 @@ const { relatedTableMeta, loadRelatedTableMeta, relatedTableDisplayValueProp, re
   useProvideLTARStore(column as Ref<Required<ColumnType>>, row, isNew, reloadRowTrigger.trigger)
 
 await loadRelatedTableMeta()
+
+const hasEditPermission = computed(() => {
+  return (!readOnly.value && isUIAllowed('dataEdit') && !isUnderLookup.value) || isForm.value
+})
 
 const value = computed(() => {
   if (cellValue?.value) {
@@ -48,7 +63,7 @@ const unlinkRef = async (rec: Record<string, any>) => {
   }
 }
 
-useSelectedCellKeyupListener(active, (e: KeyboardEvent) => {
+useSelectedCellKeydownListener(active, (e: KeyboardEvent) => {
   switch (e.key) {
     case 'Enter':
       listItemsDlg.value = true
@@ -82,13 +97,42 @@ watch(value, (next) => {
     isOpen.value = false
   }
 })
+
+function onCellClick(e: Event) {
+  if (e.type !== 'click' || !hasEditPermission.value) return
+  if (isExpandedFormOpen.value || isForm.value || active.value) {
+    listItemsDlg.value = true
+  }
+}
+
+onMounted(() => {
+  onDivDataCellEventHook?.on(onCellClick)
+  cellClickHook?.on(onCellClick)
+
+  if (!hasEditPermission.value || !isCanvasInjected || isExpandedFormOpen.value || !clientMousePosition) return
+
+  forcedNextTick(() => {
+    if (getElementAtMouse('.unlink-icon', clientMousePosition)) {
+      unlinkRef(value.value)
+    } else if (getElementAtMouse('.nc-canvas-table-editable-cell-wrapper .nc-plus.nc-action-icon', clientMousePosition)) {
+      listItemsDlg.value = true
+    } else {
+      listItemsDlg.value = true
+    }
+  })
+})
+
+onUnmounted(() => {
+  onDivDataCellEventHook?.off(onCellClick)
+  cellClickHook?.off(onCellClick)
+})
 </script>
 
 <template>
   <div class="flex w-full chips-wrapper items-center" :class="{ active }">
     <LazyVirtualCellComponentsLinkRecordDropdown v-model:is-open="isOpen">
       <div class="nc-cell-field flex items-center w-full">
-        <div class="chips flex items-center flex-1" :class="{ 'max-w-[calc(100%_-_16px)]': !isUnderLookup }">
+        <div class="chips flex items-center flex-1 min-h-[28px]" :class="{ 'max-w-[calc(100%_-_16px)]': !isUnderLookup }">
           <template v-if="value && (relatedTableDisplayValueProp || relatedTableDisplayValuePropId)">
             <VirtualCellComponentsItemChip
               :item="value"
@@ -105,7 +149,7 @@ watch(value, (next) => {
         </div>
 
         <div
-          v-if="!readOnly && (isUIAllowed('dataEdit') || isForm) && !isUnderLookup"
+          v-if="hasEditPermission"
           class="flex-none flex group items-center min-w-4"
           tabindex="0"
           @keydown.enter.stop="listItemsDlg = true"
@@ -124,6 +168,7 @@ watch(value, (next) => {
           v-model="listItemsDlg"
           :column="belongsToColumn"
           hide-back-btn
+          @escape="isOpen = false"
         /> </template
     ></LazyVirtualCellComponentsLinkRecordDropdown>
   </div>

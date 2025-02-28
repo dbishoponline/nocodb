@@ -15,6 +15,7 @@ import { SourcesService } from '~/services/sources.service';
 import { MetaApiLimiterGuard } from '~/guards/meta-api-limiter.guard';
 import { TenantContext } from '~/decorators/tenant-context.decorator';
 import { NcContext, NcRequest } from '~/interface/config';
+import { maskKnexConfig } from '~/helpers/responseHelpers';
 
 @Controller()
 @UseGuards(MetaApiLimiterGuard, GlobalGuard)
@@ -37,6 +38,9 @@ export class SourcesController {
     if (source.isMeta()) {
       source.config = undefined;
     }
+    source.integration_config = undefined;
+
+    maskKnexConfig(source);
 
     return source;
   }
@@ -60,6 +64,9 @@ export class SourcesController {
       req,
     });
 
+    source.config = undefined;
+    source.integration_config = undefined;
+
     return source;
   }
 
@@ -77,9 +84,8 @@ export class SourcesController {
     });
 
     for (const source of sources) {
-      if (source.isMeta()) {
-        source.config = undefined;
-      }
+      source.config = undefined;
+      source.integration_config = undefined;
     }
 
     return new PagedResponseImpl(sources, {

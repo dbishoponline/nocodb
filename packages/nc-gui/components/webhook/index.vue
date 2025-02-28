@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { HookReqType, HookTestReqType, HookType } from 'nocodb-sdk'
 import type { Ref } from 'vue'
+import { onKeyDown } from '@vueuse/core'
 
 import { extractNextDefaultName } from '~/helpers/parsers/parserHelpers'
 
@@ -12,7 +13,12 @@ interface Props {
 
 const props = defineProps<Props>()
 
-const emits = defineEmits(['close'])
+const emits = defineEmits(['close', 'update:value'])
+
+enum HookTab {
+  Configuration = 'configuration',
+  Log = 'log',
+}
 
 const { eventList } = toRefs(props)
 
@@ -29,6 +35,10 @@ const { hooks } = storeToRefs(useWebhooksStore())
 const { base } = storeToRefs(useBase())
 
 const meta = inject(MetaInj, ref())
+
+const { getMeta } = useMetas()
+
+const { activeTable } = toRefs(useTablesStore())
 
 const defaultHookName = t('labels.webhook')
 
@@ -51,8 +61,20 @@ let hookRef = reactive<
     payload: {
       method: 'POST',
       body: '{{ json event }}',
-      headers: [{}],
-      parameters: [{}],
+      headers: [
+        {
+          enabled: false,
+          name: '',
+          value: '',
+        },
+      ],
+      parameters: [
+        {
+          enabled: false,
+          name: '',
+          value: '',
+        },
+      ],
       path: '',
     },
   },
@@ -223,24 +245,6 @@ const validators = computed(() => {
 })
 const { validate, validateInfos } = useForm(hookRef, validators)
 
-const isValid = computed(() => {
-  // Recursively check if all the fields are valid
-  const check = (obj: Record<string, any>) => {
-    for (const key in obj) {
-      if (typeof obj[key] === 'object') {
-        if (!check(obj[key])) {
-          return false
-        }
-      } else if (obj && key === 'validateStatus' && obj[key] === 'error') {
-        return false
-      }
-    }
-    return true
-  }
-
-  return hookRef && check(validateInfos)
-})
-
 const getChannelsArray = (val: unknown) => {
   if (val) {
     if (Array.isArray(val)) {
@@ -283,7 +287,7 @@ function onNotificationTypeChange(reset = false) {
     hookRef.notification.payload.parameters = hookRef.notification.payload.parameters || [{}]
     hookRef.notification.payload.headers = hookRef.notification.payload.headers || [{}]
     hookRef.notification.payload.method = hookRef.notification.payload.method || 'POST'
-    hookRef.notification.payload.auth = hookRef.notification.payload.auth || ''
+    hookRef.notification.payload.auth = hookRef.notification.payload.auth ?? ''
   }
 }
 
@@ -373,7 +377,7 @@ async function loadPluginList() {
 }
 
 const isConditionSupport = computed(() => {
-  return hookRef.eventOperation && !hookRef.eventOperation.includes('bulk')
+  return hookRef.eventOperation && !(hookRef.eventOperation.includes('bulk') || hookRef.eventOperation.includes('manual'))
 })
 
 async function saveHooks() {
@@ -430,18 +434,23 @@ async function saveHooks() {
       return h
     })
 
-    emits('close')
+    $e('a:webhook:add', {
+      operation: hookRef.operation,
+      condition: hookRef.condition,
+      notification: hookRef.notification.type,
+    })
+
+    emits('close', hookRef)
   } catch (e: any) {
     message.error(await extractSdkResponseErrorMsg(e))
   } finally {
+    getMeta(activeTable.value.id, true)
     loading.value = false
   }
+}
 
-  $e('a:webhook:add', {
-    operation: hookRef.operation,
-    condition: hookRef.condition,
-    notification: hookRef.notification.type,
-  })
+const closeModal = () => {
+  emits('close', hookRef)
 }
 
 const isTestLoading = ref(false)
@@ -449,6 +458,8 @@ const isTestLoading = ref(false)
 const sampleData = ref()
 
 const containerElem = ref()
+
+const activeTab = ref<HookTab>(HookTab.Configuration)
 
 const [isVisible, toggleVisibility] = useToggle()
 
@@ -540,6 +551,10 @@ const getNotificationIconName = (type: string): keyof typeof iconMap => {
   }
 }
 
+onKeyDown('Escape', () => {
+  modalVisible.value = false
+})
+
 watch(
   () => hookRef.eventOperation,
   () => {
@@ -588,41 +603,74 @@ onMounted(async () => {
 <template>
   <NcModal v-model:visible="modalVisible" :show-separator="true" size="large" wrap-class-name="nc-modal-webhook-create-edit">
     <template #header>
-      <div class="flex w-full items-center p-4 justify-between">
-        <div class="flex items-center gap-3">
-          <GeneralIcon class="text-gray-900 text-2xl" icon="webhook" />
+      <div class="flex w-full items-center px-4 py-2 justify-between">
+        <div class="flex items-center gap-3 flex-1">
+          <GeneralIcon class="text-gray-900 h-5 w-5" icon="ncWebhook" />
           <span class="text-gray-900 font-semibold text-xl">
-            {{ !hook ? $t('activity.newWebhook') : $t('activity.webhookDetails') }}
+            <template v-if="activeTab === HookTab.Configuration">
+              {{ !hook ? $t('activity.newWebhook') : $t('activity.webhookDetails') }}
+            </template>
+            <template v-else>
+              {{ $t('activity.webhookLogs') }}
+            </template>
           </span>
         </div>
 
-        <div class="flex justify-end items-center gap-3">
-          <NcTooltip :disabled="!testConnectionError">
-            <template #title>
-              {{ testConnectionError }}
-            </template>
-            <NcButton :loading="isTestLoading" type="secondary" size="small" icon-position="right" @click="testWebhook">
-              <template #icon>
-                <GeneralIcon v-if="testSuccess" icon="circleCheckSolid" class="!text-green-700 w-4 h-4 flex-none" />
-                <GeneralIcon v-else-if="testConnectionError" icon="alertTriangleSolid" class="!text-red-700 w-4 h-4 flex-none" />
+        <div v-if="hook && isEeUI" class="flex flex-row p-1 bg-gray-200 rounded-lg gap-x-0.5 nc-view-sidebar-tab">
+          <div
+            v-e="['c:webhook:edit']"
+            class="tab"
+            :class="{
+              active: activeTab === HookTab.Configuration,
+            }"
+            @click="activeTab = HookTab.Configuration"
+          >
+            <div class="tab-title nc-tab">{{ $t('general.details') }}</div>
+          </div>
+          <div
+            v-e="['c:webhook:log']"
+            class="tab"
+            :class="{
+              active: activeTab === HookTab.Log,
+            }"
+            @click="activeTab = HookTab.Log"
+          >
+            <div class="tab-title nc-tab">{{ $t('general.logs') }}</div>
+          </div>
+        </div>
+
+        <div class="flex justify-end items-center gap-3 flex-1">
+          <template v-if="activeTab === HookTab.Configuration">
+            <NcTooltip :disabled="!testConnectionError">
+              <template #title>
+                {{ testConnectionError }}
               </template>
-              <span>
-                {{ testSuccess ? 'Test Successful' : $t('activity.testWebhook') }}
-              </span>
+              <NcButton :loading="isTestLoading" type="secondary" size="small" icon-position="right" @click="testWebhook">
+                <template #icon>
+                  <GeneralIcon v-if="testSuccess" icon="circleCheckSolid" class="!text-green-700 w-4 h-4 flex-none" />
+                  <GeneralIcon
+                    v-else-if="testConnectionError"
+                    icon="alertTriangleSolid"
+                    class="!text-red-700 w-4 h-4 flex-none"
+                  />
+                </template>
+                <span>
+                  {{ testSuccess ? 'Test Successful' : $t('activity.testWebhook') }}
+                </span>
+              </NcButton>
+            </NcTooltip>
+
+            <NcButton :loading="loading" type="primary" size="small" data-testid="nc-save-webhook" @click.stop="saveHooks">
+              {{ hook ? $t('labels.multiField.saveChanges') : $t('activity.createWebhook') }}
             </NcButton>
-          </NcTooltip>
-
-          <NcButton :loading="loading" type="primary" size="small" data-testid="nc-save-webhook" @click="saveHooks">
-            {{ hook ? $t('labels.multiField.saveChanges') : $t('activity.createWebhook') }}
-          </NcButton>
-
-          <NcButton type="text" size="small" data-testid="nc-close-webhook-modal" @click="modalVisible = false">
+          </template>
+          <NcButton type="text" size="small" data-testid="nc-close-webhook-modal" @click.stop="closeModal">
             <GeneralIcon icon="close" />
           </NcButton>
         </div>
       </div>
     </template>
-    <div class="flex bg-white rounded-b-2xl h-[calc(100%_-_66px)]">
+    <div v-if="activeTab === HookTab.Configuration" class="flex bg-white rounded-b-2xl h-[calc(100%_-_66px)]">
       <div
         ref="containerElem"
         class="h-full flex-1 flex flex-col overflow-y-auto scroll-smooth nc-scrollbar-thin px-12 py-6 mx-auto"
@@ -652,6 +700,7 @@ onMounted(async () => {
                   <a-select
                     v-model:value="hookRef.eventOperation"
                     size="medium"
+                    :disabled="eventList.length === 1"
                     :placeholder="$t('general.event')"
                     class="nc-text-field-hook-event !h-9 capitalize"
                     dropdown-class-name="nc-dropdown-webhook-event"
@@ -772,6 +821,7 @@ onMounted(async () => {
                       >
                         <LazyMonacoEditor
                           v-model="hookRef.notification.payload.body"
+                          lang="handlebars"
                           disable-deep-compare
                           :validate="false"
                           class="min-h-60 max-h-80 !rounded-lg"
@@ -992,11 +1042,15 @@ onMounted(async () => {
         </div>
       </div>
     </div>
+    <div v-else-if="activeTab === HookTab.Log" class="h-[calc(100%_-_66px)]">
+      <WebhookCallLog :hook="hook" />
+    </div>
   </NcModal>
 </template>
 
 <style lang="scss">
 .nc-modal-webhook-create-edit {
+  z-index: 1050;
   a {
     @apply !no-underline !text-gray-700 !hover:text-primary;
   }
@@ -1145,5 +1199,27 @@ onMounted(async () => {
 
 :deep(.mtk1) {
   @apply text-[#000000D9];
+}
+
+.tab {
+  @apply flex flex-row items-center h-6 justify-center px-2 py-1 rounded-md gap-x-2 text-gray-600 hover:text-black cursor-pointer transition-all duration-300 select-none;
+}
+
+.tab-icon {
+  font-size: 1rem !important;
+  @apply w-4;
+}
+.tab .tab-title {
+  @apply min-w-0 text-sm;
+  word-break: keep-all;
+  white-space: nowrap;
+  display: inline;
+  line-height: 0.95;
+}
+
+.active {
+  @apply bg-white text-brand-600 hover:text-brand-600;
+
+  box-shadow: 0px 3px 1px -2px rgba(0, 0, 0, 0.06), 0px 5px 3px -2px rgba(0, 0, 0, 0.02);
 }
 </style>

@@ -1,6 +1,8 @@
 import UITypes, { isNumericCol } from './UITypes';
 import { RolesObj, RolesType } from './globals';
 import { ClientType } from './enums';
+import { ColumnType, FormulaType, IntegrationsType } from './Api';
+import { FormulaDataTypes } from './formulaHelpers';
 
 // import {RelationTypes} from "./globals";
 
@@ -58,7 +60,16 @@ const stringifyRolesObj = (roles?: RolesObj | null): string => {
   const rolesArr = Object.keys(roles).filter((r) => roles[r]);
   return rolesArr.join(',');
 };
-
+const getAvailableRollupForColumn = (column: ColumnType) => {
+  if ([UITypes.Formula].includes(column.uidt as UITypes)) {
+    return getAvailableRollupForFormulaType(
+      (column.colOptions as FormulaType as any).parsed_tree?.dataType ??
+        FormulaDataTypes.UNKNOWN
+    );
+  } else {
+    return getAvailableRollupForUiType(column.uidt);
+  }
+};
 const getAvailableRollupForUiType = (type: string) => {
   if (
     [
@@ -120,6 +131,37 @@ const getAvailableRollupForUiType = (type: string) => {
   ];
 };
 
+const getAvailableRollupForFormulaType = (type: FormulaDataTypes) => {
+  switch (type) {
+    case FormulaDataTypes.DATE:
+    case FormulaDataTypes.INTERVAL: {
+      return ['count', 'min', 'max', 'countDistinct'];
+    }
+    case FormulaDataTypes.NUMERIC: {
+      return [
+        'sum',
+        'count',
+        'min',
+        'max',
+        'avg',
+        'countDistinct',
+        'sumDistinct',
+        'avgDistinct',
+      ];
+    }
+    case FormulaDataTypes.BOOLEAN: {
+      return ['count', 'sum'];
+    }
+    case FormulaDataTypes.STRING: {
+      return ['count', 'countDistinct'];
+    }
+    case FormulaDataTypes.UNKNOWN:
+    default: {
+      return ['count'];
+    }
+  }
+};
+
 const getRenderAsTextFunForUiType = (type: UITypes) => {
   if (
     [
@@ -129,7 +171,6 @@ const getRenderAsTextFunForUiType = (type: UITypes) => {
       UITypes.DateTime,
       UITypes.CreatedTime,
       UITypes.LastModifiedTime,
-      UITypes.Decimal,
       UITypes.Currency,
       UITypes.Duration,
     ].includes(type)
@@ -186,9 +227,9 @@ function roundUpToPrecision(number: number, precision: number = 0) {
     let pair = `${number}e`.split('e');
     const value = Math.round(Number(`${pair[0]}e${+pair[1] + precision}`));
     pair = `${value}e`.split('e');
-    return +`${pair[0]}e${+pair[1] - precision}`;
+    return (+`${pair[0]}e${+pair[1] - precision}`).toFixed(precision);
   }
-  return Math.round(number);
+  return Math.round(number).toFixed(precision);
 }
 
 export {
@@ -199,7 +240,9 @@ export {
   isSelfReferencingTableColumn,
   extractRolesObj,
   stringifyRolesObj,
+  getAvailableRollupForColumn,
   getAvailableRollupForUiType,
+  getAvailableRollupForFormulaType,
   getRenderAsTextFunForUiType,
   populateUniqueFileName,
   roundUpToPrecision,
@@ -222,3 +265,41 @@ export const getTestDatabaseName = (db: {
     return db.connection?.database;
   return testDataBaseNames[db.client as keyof typeof testDataBaseNames];
 };
+
+export const integrationCategoryNeedDefault = (category: IntegrationsType) => {
+  return [IntegrationsType.Ai].includes(category);
+};
+
+export function parseProp(v: any): any {
+  if (!v) return {};
+  try {
+    return typeof v === 'string' ? JSON.parse(v) ?? {} : v;
+  } catch {
+    return {};
+  }
+}
+
+export function stringifyProp(v: any): string {
+  if (!v) return '{}';
+  try {
+    return typeof v === 'string' ? v : JSON.stringify(v) ?? '{}';
+  } catch {
+    return '{}';
+  }
+}
+
+export function parseHelper(v: any): any {
+  try {
+    return typeof v === 'string' ? JSON.parse(v) : v;
+  } catch {
+    return v;
+  }
+}
+
+export function stringifyHelper(v: any): string {
+  try {
+    return typeof v === 'string' ? v : JSON.stringify(v);
+  } catch {
+    return v;
+  }
+}

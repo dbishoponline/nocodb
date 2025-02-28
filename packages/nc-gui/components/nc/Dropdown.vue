@@ -4,8 +4,9 @@ const props = withDefaults(
     trigger?: Array<'click' | 'hover' | 'contextmenu'>
     visible?: boolean | undefined
     overlayClassName?: string | undefined
+    overlayStyle?: Record<string, any>
     disabled?: boolean
-    placement?: 'bottom' | 'top' | 'bottomLeft' | 'bottomRight' | 'topLeft' | 'topRight' | 'topCenter' | 'bottomCenter'
+    placement?: 'bottom' | 'top' | 'bottomLeft' | 'bottomRight' | 'topLeft' | 'topRight' | 'topCenter' | 'bottomCenter' | 'right'
     autoClose?: boolean
   }>(),
   {
@@ -15,6 +16,7 @@ const props = withDefaults(
     disabled: false,
     overlayClassName: undefined,
     autoClose: true,
+    overlayStyle: () => ({}),
   },
 )
 
@@ -26,17 +28,20 @@ const overlayClassName = toRef(props, 'overlayClassName')
 
 const placement = toRef(props, 'placement')
 
+const overlayStyle = toRef(props, 'overlayStyle')
+
 const autoClose = computed(() => props.autoClose)
+
+const visible = useVModel(props, 'visible', emits)
 
 const overlayClassNameComputed = computed(() => {
   let className = 'nc-dropdown bg-white rounded-lg border-1 border-gray-200 shadow-lg'
   if (overlayClassName.value) {
     className += ` ${overlayClassName.value}`
   }
+  className += visible.value ? ' active' : ' '
   return className
 })
-
-const visible = useVModel(props, 'visible', emits)
 
 onKeyStroke('Escape', () => {
   if (visible.value && autoClose.value) {
@@ -65,9 +70,10 @@ const onVisibleUpdate = (event: any) => {
   <a-dropdown
     :disabled="disabled"
     :visible="visible"
-    :placement="placement"
+    :placement="placement as any"
     :trigger="trigger"
     :overlay-class-name="overlayClassNameComputed"
+    :overlay-style="overlayStyle"
     @update:visible="onVisibleUpdate"
   >
     <slot />

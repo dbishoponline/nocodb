@@ -20,8 +20,6 @@ test.describe('View', () => {
     toolbar = toolbar = dashboard.kanban.toolbar;
     topbar = dashboard.kanban.topbar;
 
-    // close 'Team & Auth' tab
-    await dashboard.closeTab({ title: 'Team & Auth' });
     await dashboard.treeView.openTable({ title: 'Film' });
 
     if (isSqlite(context)) {
@@ -88,8 +86,8 @@ test.describe('View', () => {
     });
 
     // hide fields
-    await toolbar.fields.toggleShowAllFields({ isLocallySaved: false });
-    await toolbar.fields.toggleShowAllFields({ isLocallySaved: false });
+    await toolbar.fields.toggleShowAllFields({ isLocallySaved: false, isKanban: true });
+    await toolbar.fields.toggleShowAllFields({ isLocallySaved: false, isKanban: true });
     await toolbar.fields.toggle({ title: 'Title' });
     await kanban.verifyCardCount({
       count: [0, 25, 25, 25, 25, 25],
@@ -223,13 +221,13 @@ test.describe('View', () => {
     });
     await toolbar.clickFilter();
 
-    await toolbar.fields.toggleShowAllFields();
-    await toolbar.fields.toggleShowAllFields();
+    await toolbar.fields.toggleShowAllFields({ isKanban: true });
+    await toolbar.fields.toggleShowAllFields({ isKanban: true });
     await toolbar.fields.toggle({ title: 'Title' });
 
     await dashboard.viewSidebar.copyView({ title: 'Film Kanban' });
     await dashboard.viewSidebar.verifyView({
-      title: 'Kanban',
+      title: 'Film Kanban copy',
       index: 1,
     });
     const kanban = dashboard.kanban;
@@ -255,12 +253,12 @@ test.describe('View', () => {
       });
 
     await dashboard.viewSidebar.changeViewIcon({
-      title: 'Kanban',
+      title: 'Film Kanban copy',
       icon: 'american-football',
       iconDisplay: '🏈',
     });
 
-    await dashboard.viewSidebar.deleteView({ title: 'Kanban' });
+    await dashboard.viewSidebar.deleteView({ title: 'Film Kanban copy' });
     ///////////////////////////////////////////////
 
     await dashboard.viewSidebar.openView({ title: 'Film Kanban' });
@@ -281,8 +279,8 @@ test.describe('View', () => {
     await kanban.verifyCollapseStackCount({ count: 0 });
 
     // add record to stack & verify
-    await toolbar.fields.toggleShowAllFields();
-    await toolbar.fields.toggleShowAllFields();
+    await toolbar.fields.toggleShowAllFields({ isKanban: true });
+    await toolbar.fields.toggleShowAllFields({ isKanban: true });
     await toolbar.fields.toggleShowSystemFields();
     await toolbar.fields.toggle({ title: 'LanguageId' });
     await toolbar.fields.toggle({ title: 'Title' });

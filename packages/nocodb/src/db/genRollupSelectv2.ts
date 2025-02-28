@@ -1,13 +1,17 @@
-import { NcDataErrorCodes, RelationTypes } from 'nocodb-sdk';
+import { NcDataErrorCodes, RelationTypes, UITypes } from 'nocodb-sdk';
+import type { Knex } from 'knex';
 import type { BaseModelSqlv2 } from '~/db/BaseModelSqlv2';
 import type {
+  ButtonColumn,
+  FormulaColumn,
   LinksColumn,
   LinkToAnotherRecordColumn,
   RollupColumn,
 } from '~/models';
 import type { XKnex } from '~/db/CustomKnex';
-import type { Knex } from 'knex';
+import { RelationManager } from '~/db/relation-manager';
 import { Model } from '~/models';
+import formulaQueryBuilderv2 from '~/db/formulav2/formulaQueryBuilderv2';
 
 export default async function ({
   baseModelSqlv2,
@@ -43,7 +47,70 @@ export default async function ({
     dbDriver: knex,
   });
 
-  const applyFunction = (qb: any) => {
+  const applyFunction = async (qb: any) => {
+    let selectColumnName = knex.raw('??.??', [
+      refTableAlias,
+      rollupColumn.column_name,
+    ]);
+    if (rollupColumn.uidt === UITypes.Formula) {
+      const formulOption = await rollupColumn.getColOptions<
+        FormulaColumn | ButtonColumn
+      >(context);
+
+      const formulaQb = await formulaQueryBuilderv2(
+        baseModelSqlv2,
+        formulOption.formula,
+        undefined,
+        RelationManager.isRelationReversed(relationColumn, relationColumnOption)
+          ? parentModel
+          : childModel,
+        rollupColumn,
+        {},
+        refTableAlias,
+        false,
+        formulOption.getParsedTree(),
+        undefined,
+      );
+
+      selectColumnName = knex.raw(formulaQb.builder).wrap('(', ')');
+    } else if (
+      [
+        UITypes.CreatedTime,
+        UITypes.CreatedBy,
+        UITypes.LastModifiedTime,
+        UITypes.LastModifiedBy,
+      ].includes(rollupColumn.uidt)
+    ) {
+      // since all field are virtual field,
+      // we use formula to generate query that can represent the column
+      // to prevent duplicate logic
+      const formulaQb = await formulaQueryBuilderv2(
+        baseModelSqlv2,
+        '{{' + rollupColumn.id + '}}',
+        undefined,
+        RelationManager.isRelationReversed(relationColumn, relationColumnOption)
+          ? parentModel
+          : childModel,
+        rollupColumn,
+        {},
+        refTableAlias,
+        false,
+        {
+          type: 'Identifier',
+          name: rollupColumn.id,
+          raw: '{{' + rollupColumn.id + '}}',
+          dataType: [UITypes.CreatedTime, UITypes.LastModifiedTime].includes(
+            rollupColumn.uidt,
+          )
+            ? 'date'
+            : 'string',
+        },
+        undefined,
+      );
+
+      selectColumnName = knex.raw(formulaQb.builder).wrap('(', ')');
+    }
+
     // if postgres and rollup function is sum/sumDistinct/avgDistinct/avg, then cast the column to integer when type is boolean
     if (
       baseModelSqlv2.isPg &&
@@ -53,14 +120,24 @@ export default async function ({
       ['bool', 'boolean'].includes(rollupColumn.dt)
     ) {
       qb[columnOptions.rollup_function as string]?.(
-        knex.raw('??.??::integer', [refTableAlias, rollupColumn.column_name]),
+        knex.raw('??::integer', [selectColumnName]),
       );
       return;
     }
 
-    qb[columnOptions.rollup_function as string]?.(
-      knex.ref(`${refTableAlias}.${rollupColumn.column_name}`),
-    );
+    if (
+      ['sum', 'sumDistinct', 'avgDistinct', 'avg'].includes(
+        columnOptions.rollup_function,
+      )
+    ) {
+      qb.select(
+        knex.raw(`COALESCE((??), 0)`, [
+          knex[columnOptions.rollup_function as string]?.(selectColumnName),
+        ]),
+      );
+    } else {
+      qb[columnOptions.rollup_function as string]?.(selectColumnName);
+    }
   };
 
   switch (relationColumnOption.type) {
@@ -79,7 +156,7 @@ export default async function ({
         '=',
         knex.ref(`${refTableAlias}.${childCol.column_name}`),
       );
-      applyFunction(queryBuilder);
+      await applyFunction(queryBuilder);
 
       return {
         builder: queryBuilder,
@@ -102,7 +179,7 @@ export default async function ({
         knex.ref(`${refTableAlias}.${childCol.column_name}`),
       );
 
-      applyFunction(qb);
+      await applyFunction(qb);
       return {
         builder: qb,
       };
@@ -152,7 +229,7 @@ export default async function ({
           ),
         );
 
-      applyFunction(qb);
+      await applyFunction(qb);
 
       return {
         builder: qb,

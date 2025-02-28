@@ -11,7 +11,6 @@ on:
     paths:
       - "packages/nocodb-sdk/**"
       - "packages/nc-gui/**"
-      - "packages/nc-plugin/**"
       - "packages/nocodb/**"
 
 concurrency:
@@ -22,7 +21,7 @@ jobs:
   # enrich tag for pr release
   set-tag:
     if: ${{ github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]' && github.event.pull_request.draft == false && github.base_ref == 'develop' && github.event.action != 'closed' }}
-    runs-on: 'ubuntu-latest'
+    runs-on: 'ubuntu-22.04'
     steps:
       - name: Checkout
         uses: actions/checkout@v3
@@ -51,22 +50,11 @@ jobs:
       target_tag: ${{ steps.tag-step.outputs.TARGET_TAG }}
       current_version: ${{ steps.tag-step.outputs.CURRENT_VERSION }}
 
-  # Build, install, publish frontend and backend to npm
-  release-npm:
-    if: ${{ github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]' && github.event.pull_request.draft == false && github.base_ref == 'develop' && github.event.action != 'closed' }}
-    needs: [set-tag]
-    uses: ./.github/workflows/release-npm.yml
-    with:
-      tag: ${{ needs.set-tag.outputs.target_tag }}
-      targetEnv: 'DEV'
-    secrets:
-      NPM_TOKEN: "${{ secrets.NPM_TOKEN }}"
-
   # Build docker image and push to docker hub
   release-docker:
     if: ${{ github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]' && github.event.pull_request.draft == false && github.base_ref == 'develop' && github.event.action != 'closed' }}
-    needs: [release-npm, set-tag]
-    uses: ./.github/workflows/release-docker.yml
+    needs: [set-tag]
+    uses: ./.github/workflows/release-timely-docker.yml
     with:
       currentVersion: ${{ needs.set-tag.outputs.current_version }}
       tag: ${{ needs.set-tag.outputs.target_tag }}
@@ -89,7 +77,7 @@ jobs:
   # Add a comment for PR docker build
   leave-comment:
     if: ${{ github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]' && github.event.pull_request.draft == false && github.base_ref == 'develop' && github.event.action != 'closed' }}
-    runs-on: 'ubuntu-latest'
+    runs-on: 'ubuntu-22.04'
     needs: [release-docker, set-tag]
     steps:
       - uses: peter-evans/commit-comment@v2
@@ -104,7 +92,7 @@ jobs:
   preview-pull-request:
     name: "Trigger Uffizzi Preview"
     if: ${{ github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]' && github.event.pull_request.draft == false && github.base_ref == 'develop' && github.event.action != 'closed' }}
-    runs-on: 'ubuntu-latest'
+    runs-on: 'ubuntu-22.04'
     needs: [release-docker, set-tag]
     outputs:
       compose-file-cache-key:  ${{ env.COMPOSE_FILE_HASH }}
@@ -119,9 +107,9 @@ jobs:
           envsubst < .github/uffizzi/docker-compose.uffizzi.yml > docker-compose.rendered.yml
           cat docker-compose.rendered.yml
       - name: Upload Rendered Compose File as Artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
-          name: preview-spec
+          name: preview-spec-docker-compose
           path: docker-compose.rendered.yml
           retention-days: 2
       - name: Serialize PR Event to File
@@ -130,16 +118,16 @@ jobs:
           ${{ toJSON(github.event) }}
           EOF
       - name: Upload PR Event as Artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
-          name: preview-spec
+          name: preview-spec-event
           path: event.json
           retention-days: 2
 
   # Add a comment for PR executable build
   # leave-executable-comment:
   #   if: ${{ github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]' && github.event.pull_request.draft == false && github.base_ref == 'develop' && github.event.action != 'closed' }}
-  #   runs-on: 'ubuntu-latest'
+  #   runs-on: 'ubuntu-22.04'
   #   needs: [release-executables, set-tag]
   #   steps:
   #     - uses: peter-evans/commit-comment@v2
@@ -175,7 +163,7 @@ jobs:
   # delete the uffizzi preview created off of this PR
   delete-uffizzi-preview:
     name: Call for Preview Deletion
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     if: ${{ github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]' && github.event.pull_request.draft == false && github.base_ref == 'develop' && github.event.action == 'closed' }}
     steps:
       # If this PR is closing, we will not render a compose file nor pass it to the next workflow.
@@ -186,8 +174,9 @@ jobs:
 
           EOF
       - name: Upload PR Event as Artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
-          name: preview-spec
+          name: preview-spec-event
           path: event.json
           retention-days: 2
+          overwrite: true
