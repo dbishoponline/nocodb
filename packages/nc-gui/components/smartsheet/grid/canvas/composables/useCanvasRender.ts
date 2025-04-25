@@ -98,6 +98,7 @@ export function useCanvasRender({
   const colResizeHoveredColIds = ref(new Set())
   const { tryShowTooltip } = useTooltipStore()
   const { isMobileMode } = useGlobal()
+  const isLocked = inject(IsLockedInj, ref(false))
 
   const drawShimmerEffect = (ctx: CanvasRenderingContext2D, x: number, y: number, width: number, rowIdx: number) => {
     ctx.save()
@@ -199,7 +200,7 @@ export function useCanvasRender({
         })
       }
 
-      const isRequired = colObj.rqd && !colObj.cdf
+      const isRequired = column.virtual ? isVirtualColRequired(colObj, meta.value?.columns || []) : colObj?.rqd && !colObj?.cdf
 
       const availableTextWidth = width - (26 + iconSpace + (isRequired ? 4 : 0))
       const truncatedText = truncateText(ctx, column.title!, availableTextWidth)
@@ -213,10 +214,19 @@ export function useCanvasRender({
 
       let rightOffset = xOffset + width - rightPadding
 
-      if (isFieldEditAllowed.value) {
+      if (isFieldEditAllowed.value && !colObj?.readonly) {
         rightOffset -= 16
         spriteLoader.renderIcon(ctx, {
           icon: 'chevronDown',
+          size: 14,
+          color: '#6a7184',
+          x: rightOffset - scrollLeft.value,
+          y: 9,
+        })
+      } else if (meta.value?.synced && colObj?.readonly) {
+        rightOffset -= 16
+        spriteLoader.renderIcon(ctx, {
+          icon: 'refresh',
           size: 14,
           color: '#6a7184',
           x: rightOffset - scrollLeft.value,
@@ -251,7 +261,7 @@ export function useCanvasRender({
       const isNearEdge =
         mousePosition && Math.abs(xOffset - scrollLeft.value - mousePosition.x) <= resizeHandleWidth && mousePosition.y <= 32
 
-      if (isNearEdge) {
+      if (isNearEdge && !isLocked.value) {
         colResizeHoveredColIds.value.add(column.id)
         ctx.strokeStyle = '#9CDAFA'
         ctx.lineWidth = 2
@@ -394,7 +404,7 @@ export function useCanvasRender({
           })
         }
 
-        const isRequired = colObj?.rqd && !colObj?.cdf
+        const isRequired = column.virtual ? isVirtualColRequired(colObj, meta.value?.columns || []) : colObj?.rqd && !colObj?.cdf
 
         const availableTextWidth = width - (26 + iconSpace + (isRequired ? 4 : 0))
 
@@ -434,11 +444,20 @@ export function useCanvasRender({
 
         let rightOffset = xOffset + width - rightPadding
 
-        if (column.uidt && isFieldEditAllowed.value) {
+        if (column.uidt && isFieldEditAllowed.value && !colObj?.readonly) {
           // Chevron down
           rightOffset -= 16
           spriteLoader.renderIcon(ctx, {
             icon: 'chevronDown',
+            size: 14,
+            color: '#6a7184',
+            x: rightOffset,
+            y: 9,
+          })
+        } else if (meta.value?.synced && colObj?.readonly) {
+          rightOffset -= 16
+          spriteLoader.renderIcon(ctx, {
+            icon: 'refresh',
             size: 14,
             color: '#6a7184',
             x: rightOffset,
@@ -485,7 +504,7 @@ export function useCanvasRender({
           ctx.stroke()
         }
 
-        if (isNearEdge && column.id !== 'row_number') {
+        if (isNearEdge && column.id !== 'row_number' && !isLocked.value) {
           colResizeHoveredColIds.value.add(column.id)
           ctx.strokeStyle = '#9CDAFA'
           ctx.lineWidth = 2
@@ -1322,32 +1341,34 @@ export function useCanvasRender({
 
         ctx.restore()
       } else if (isHovered) {
-        ctx.save()
-        ctx.beginPath()
+        if (!isLocked.value) {
+          ctx.save()
+          ctx.beginPath()
 
-        ctx.rect(xOffset - scrollLeft.value, height.value - AGGREGATION_HEIGHT, width, AGGREGATION_HEIGHT)
-        ctx.fill()
-        ctx.clip()
+          ctx.rect(xOffset - scrollLeft.value, height.value - AGGREGATION_HEIGHT, width, AGGREGATION_HEIGHT)
+          ctx.fill()
+          ctx.clip()
 
-        ctx.font = '600 10px Manrope'
-        ctx.fillStyle = '#6a7184'
-        ctx.textAlign = 'right'
-        ctx.textBaseline = 'middle'
+          ctx.font = '600 10px Manrope'
+          ctx.fillStyle = '#6a7184'
+          ctx.textAlign = 'right'
+          ctx.textBaseline = 'middle'
 
-        const rightEdge = xOffset + width - 8 - scrollLeft.value
-        const textY = height.value - AGGREGATION_HEIGHT / 2
+          const rightEdge = xOffset + width - 8 - scrollLeft.value
+          const textY = height.value - AGGREGATION_HEIGHT / 2
 
-        ctx.fillText('Summary', rightEdge, textY)
+          ctx.fillText('Summary', rightEdge, textY)
 
-        const textLen = ctx.measureText('Summary').width
+          const textLen = ctx.measureText('Summary').width
 
-        spriteLoader.renderIcon(ctx, {
-          icon: 'chevronDown',
-          size: 14,
-          color: '#6a7184',
-          x: rightEdge - textLen - 18,
-          y: textY - 7,
-        })
+          spriteLoader.renderIcon(ctx, {
+            icon: 'chevronDown',
+            size: 14,
+            color: '#6a7184',
+            x: rightEdge - textLen - 18,
+            y: textY - 7,
+          })
+        }
         ctx.restore()
       }
 
@@ -1413,31 +1434,32 @@ export function useCanvasRender({
           availWidth -= w
           ctx.restore()
         } else if (isHovered) {
-          ctx.save()
-          ctx.beginPath()
-          ctx.rect(xOffset, height.value - AGGREGATION_HEIGHT, mergedWidth, AGGREGATION_HEIGHT)
-          ctx.clip()
+          if (!isLocked.value) {
+            ctx.save()
+            ctx.beginPath()
+            ctx.rect(xOffset, height.value - AGGREGATION_HEIGHT, mergedWidth, AGGREGATION_HEIGHT)
+            ctx.clip()
 
-          ctx.font = '600 10px Manrope'
-          ctx.textAlign = 'right'
+            ctx.font = '600 10px Manrope'
+            ctx.textAlign = 'right'
 
-          const rightEdge = xOffset + mergedWidth - 8
-          const textY = height.value - AGGREGATION_HEIGHT / 2
+            const rightEdge = xOffset + mergedWidth - 8
+            const textY = height.value - AGGREGATION_HEIGHT / 2
 
-          ctx.fillText('Summary', rightEdge, textY)
+            ctx.fillText('Summary', rightEdge, textY)
 
-          const textLen = ctx.measureText('Summary').width
+            const textLen = ctx.measureText('Summary').width
 
-          availWidth -= textLen
+            availWidth -= textLen
 
-          spriteLoader.renderIcon(ctx, {
-            icon: 'chevronDown',
-            size: 14,
-            color: '#6a7184',
-            x: rightEdge - textLen - 18,
-            y: textY - 7,
-          })
-
+            spriteLoader.renderIcon(ctx, {
+              icon: 'chevronDown',
+              size: 14,
+              color: '#6a7184',
+              x: rightEdge - textLen - 18,
+              y: textY - 7,
+            })
+          }
           availWidth -= 18
           ctx.restore()
         }
@@ -1529,14 +1551,15 @@ export function useCanvasRender({
             ctx.fillText('Summary', rightEdge, textY)
 
             const textLen = ctx.measureText('Summary').width
-
-            spriteLoader.renderIcon(ctx, {
-              icon: 'chevronDown',
-              size: 14,
-              color: '#6a7184',
-              x: rightEdge - textLen - 18,
-              y: textY - 7,
-            })
+            if (!isLocked.value) {
+              spriteLoader.renderIcon(ctx, {
+                icon: 'chevronDown',
+                size: 14,
+                color: '#6a7184',
+                x: rightEdge - textLen - 18,
+                y: textY - 7,
+              })
+            }
             ctx.restore()
           }
 

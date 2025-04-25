@@ -1,5 +1,10 @@
 import type { XKnex } from '~/db/CustomKnex';
-import type { NcApiVersion, NcContext } from 'nocodb-sdk';
+import type {
+  NcApiVersion,
+  NcContext,
+  NcRequest,
+  RelationTypes,
+} from 'nocodb-sdk';
 import type { Column, Model } from '~/models';
 import type { Knex } from 'knex';
 import type CustomKnex from '~/db/CustomKnex';
@@ -51,6 +56,29 @@ export interface IBaseModelSqlV2 {
   extractPksValues(data: any, asString?: boolean): any;
 
   getViewId(): string;
+
+  getTnPath(
+    tb:
+      | {
+          table_name: string;
+        }
+      | string,
+    alias?: string,
+  ): string | Knex.Raw<any>;
+
+  afterAddChild(props: {
+    columnTitle: string;
+    columnId: string;
+    refColumnTitle: string;
+    rowId: unknown;
+    refRowId: unknown;
+    req: NcRequest;
+    model?: Model;
+    refModel?: Model;
+    displayValue: unknown;
+    refDisplayValue: unknown;
+    type: RelationTypes;
+  }): Promise<void>;
 
   get dbDriver(): CustomKnex;
   get isSqlite(): boolean;

@@ -1,18 +1,20 @@
+import { Injectable, Logger, NotImplementedException } from '@nestjs/common';
+import debug from 'debug';
 import {
   isAIPromptCol,
   isLinksOrLTAR,
   isVirtualCol,
   NcApiVersion,
   RelationTypes,
+  SqlUiFactory,
   UITypes,
   ViewTypes,
 } from 'nocodb-sdk';
-import { Injectable, Logger } from '@nestjs/common';
 import papaparse from 'papaparse';
-import debug from 'debug';
 import { elapsedTime, initTime } from '../../helpers';
 import type { UserType, ViewCreateReqType } from 'nocodb-sdk';
 import type { Readable } from 'stream';
+import type { NcContext, NcRequest } from '~/interface/config';
 import type {
   CalendarView,
   LinksColumn,
@@ -20,9 +22,8 @@ import type {
   User,
   View,
 } from '~/models';
-import type { NcContext, NcRequest } from '~/interface/config';
-import { Comment, Hook } from '~/models';
-import { Base, Column, Model, Source } from '~/models';
+import { sanitizeColumnName } from '~/helpers';
+import { NcError } from '~/helpers/catchError';
 import {
   findWithIdentifier,
   generateUniqueName,
@@ -32,25 +33,24 @@ import {
   withoutId,
   withoutNull,
 } from '~/helpers/exportImportHelpers';
-import { NcError } from '~/helpers/catchError';
-import { TablesService } from '~/services/tables.service';
+import NcPluginMgrv2 from '~/helpers/NcPluginMgrv2';
+import { Base, Column, Comment, Hook, Model, Source } from '~/models';
+import { BulkDataAliasService } from '~/services/bulk-data-alias.service';
+import { CalendarsService } from '~/services/calendars.service';
 import { ColumnsService } from '~/services/columns.service';
 import { FiltersService } from '~/services/filters.service';
-import { SortsService } from '~/services/sorts.service';
-import { ViewColumnsService } from '~/services/view-columns.service';
-import { GridColumnsService } from '~/services/grid-columns.service';
 import { FormColumnsService } from '~/services/form-columns.service';
-import { GridsService } from '~/services/grids.service';
 import { FormsService } from '~/services/forms.service';
-import { CalendarsService } from '~/services/calendars.service';
 import { GalleriesService } from '~/services/galleries.service';
-import { KanbansService } from '~/services/kanbans.service';
+import { GridColumnsService } from '~/services/grid-columns.service';
+import { GridsService } from '~/services/grids.service';
 import { HooksService } from '~/services/hooks.service';
+import { KanbansService } from '~/services/kanbans.service';
+import { SortsService } from '~/services/sorts.service';
+import { TablesService } from '~/services/tables.service';
+import { ViewColumnsService } from '~/services/view-columns.service';
 import { ViewsService } from '~/services/views.service';
-import NcPluginMgrv2 from '~/helpers/NcPluginMgrv2';
-import { BulkDataAliasService } from '~/services/bulk-data-alias.service';
 import NcConnectionMgrv2 from '~/utils/common/NcConnectionMgrv2';
-import { sanitizeColumnName } from '~/helpers';
 
 @Injectable()
 export class ImportService {
@@ -58,22 +58,37 @@ export class ImportService {
   protected readonly logger = new Logger(ImportService.name);
 
   constructor(
-    private tablesService: TablesService,
-    private columnsService: ColumnsService,
-    private filtersService: FiltersService,
-    private sortsService: SortsService,
-    private viewColumnsService: ViewColumnsService,
-    private gridColumnsService: GridColumnsService,
-    private formColumnsService: FormColumnsService,
-    private gridsService: GridsService,
-    private formsService: FormsService,
-    private galleriesService: GalleriesService,
-    private calendarsService: CalendarsService,
-    private kanbansService: KanbansService,
-    private bulkDataService: BulkDataAliasService,
-    private hooksService: HooksService,
-    private viewsService: ViewsService,
+    protected tablesService: TablesService,
+    protected columnsService: ColumnsService,
+    protected filtersService: FiltersService,
+    protected sortsService: SortsService,
+    protected viewColumnsService: ViewColumnsService,
+    protected gridColumnsService: GridColumnsService,
+    protected formColumnsService: FormColumnsService,
+    protected gridsService: GridsService,
+    protected formsService: FormsService,
+    protected galleriesService: GalleriesService,
+    protected calendarsService: CalendarsService,
+    protected kanbansService: KanbansService,
+    protected bulkDataService: BulkDataAliasService,
+    protected hooksService: HooksService,
+    protected viewsService: ViewsService,
   ) {}
+
+  async importUsers(
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    context: NcContext,
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    payload: {
+      users: {
+        email: string;
+        display_name?: string;
+      }[];
+      req: NcRequest;
+    },
+  ) {
+    throw new NotImplementedException();
+  }
 
   async importModels(
     context: NcContext,
@@ -114,6 +129,7 @@ export class ImportService {
     const source = await Source.get(context, param.sourceId);
 
     if (!source) return NcError.sourceNotFound(param.sourceId);
+    const sqlUi = SqlUiFactory.create(await source.getConnectionConfig());
 
     const tableReferences = new Map<string, Model>();
     const linkMap = new Map<string, string>();
@@ -201,10 +217,10 @@ export class ImportService {
         }));
 
       idMap.set(modelData.id, table.id);
-
       if (param.existingModel) {
         if (reducedColumnSet.length) {
           for (const col of reducedColumnSet) {
+            col.dt = col.dt ?? sqlUi.getDataTypeForUiType(col).dt;
             const freshModelData = (await this.columnsService.columnAdd(
               context,
               {
@@ -228,6 +244,7 @@ export class ImportService {
       } else {
         // map column id's with new created column id's
         for (const col of table.columns) {
+          col.dt = col.dt ?? sqlUi.getDataTypeForUiType(col).dt;
           const colRef = modelData.columns.find(
             (a) =>
               a.column_name &&
@@ -341,6 +358,7 @@ export class ImportService {
       );
 
       for (const col of linkedColumnSet) {
+        col.dt = col.dt ?? sqlUi.getDataTypeForUiType(col).dt;
         if (col.colOptions) {
           const colOptions = col.colOptions as LinksColumn;
           if (idMap.has(colOptions.fk_related_model_id)) {
@@ -1184,6 +1202,7 @@ export class ImportService {
     // create referenced columns
     // sort the column sets to create the system columns first
     for (const col of sortedReferencedColumnSet) {
+      col.dt = col.dt ?? sqlUi.getDataTypeForUiType(col).dt;
       const { colOptions, ...flatCol } = col;
       if (col.uidt === UITypes.Lookup) {
         if (!getIdOrExternalId(colOptions.fk_relation_column_id)) continue;
@@ -1677,7 +1696,7 @@ export class ImportService {
           for (const [k, v] of Object.entries(galleryData)) {
             switch (k) {
               case 'fk_cover_image_col_id':
-                galleryData[k] = idMap.get(v as string);
+                galleryData[k] = idMap.get(v as string) ?? null;
                 break;
             }
           }
@@ -1707,7 +1726,7 @@ export class ImportService {
             switch (k) {
               case 'fk_grp_col_id':
               case 'fk_cover_image_col_id':
-                kanbanData[k] = idMap.get(v as string);
+                kanbanData[k] = idMap.get(v as string) ?? null;
                 break;
               case 'meta': {
                 const meta = {};

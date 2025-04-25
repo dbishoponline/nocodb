@@ -47,6 +47,7 @@ export function useCanvasTable({
   addNewColumn,
   mousePosition,
   setCursor,
+  getRows,
 }: {
   rowHeightEnum?: Ref<number | undefined>
   cachedRows: Ref<Map<number, Row>>
@@ -103,6 +104,7 @@ export function useCanvasTable({
   onActiveCellChanged: () => void
   addNewColumn: () => void
   setCursor: SetCursorType
+  getRows: (start: number, end: number) => Promise<Row[]>
 }) {
   const { metas, getMeta } = useMetas()
 
@@ -159,7 +161,6 @@ export function useCanvasTable({
 
   const isPublicView = inject(IsPublicInj, ref(false))
   const readOnly = inject(ReadonlyInj, ref(false))
-  const isLocked = inject(IsLockedInj, ref(false))
 
   const { loadAutomation } = automationStore
   const actionManager = new ActionManager($api, loadAutomation, generateRows, meta, cachedRows, triggerRefreshCanvas)
@@ -170,17 +171,19 @@ export function useCanvasTable({
 
   const isRowReorderDisabled = computed(() => sorts.value?.length || isPublicView.value || !isPrimaryKeyAvailable.value)
 
-  const isDataEditAllowed = computed(() => isUIAllowed('dataEdit'))
+  const isDataEditAllowed = computed(() => isUIAllowed('dataEdit') && !isSqlView.value)
 
-  const isFieldEditAllowed = computed(() => !isLocked.value && isUIAllowed('fieldAdd'))
+  const isFieldEditAllowed = computed(() => isUIAllowed('fieldAdd'))
 
   const isRowDraggingEnabled = computed(
     () => !selectedRows.value.length && isOrderColumnExists.value && !isRowReorderDisabled.value && !vSelectedAllRecords.value,
   )
 
-  const isAddingEmptyRowAllowed = computed(() => isDataEditAllowed.value && !isSqlView.value && !isPublicView.value)
+  const isAddingEmptyRowAllowed = computed(
+    () => isDataEditAllowed.value && !isSqlView.value && !isPublicView.value && !meta.value?.synced,
+  )
 
-  const isAddingColumnAllowed = computed(() => !readOnly.value && !isLocked.value && isFieldEditAllowed.value && !isSqlView.value)
+  const isAddingColumnAllowed = computed(() => !readOnly.value && isFieldEditAllowed.value && !isSqlView.value)
 
   const rowHeight = computed(() => (isMobileMode.value ? 56 : rowHeightInPx[`${rowHeightEnum?.value ?? 1}`] ?? 32))
 
@@ -194,7 +197,6 @@ export function useCanvasTable({
 
   const columns = computed<CanvasGridColumn[]>(() => {
     const fetchMetaIdsLocal: string[] = []
-
     const cols = fields.value
       .map((f) => {
         if (!f.id) return false
@@ -236,7 +238,11 @@ export function useCanvasTable({
           f.extra = getUserColOptions(f, baseUsers.value)
         }
 
-        const isInvalid = isColumnInvalid(f, aiIntegrations.value, isPublicView.value || !isAddingEmptyRowAllowed.value)
+        const isInvalid = isColumnInvalid(
+          f,
+          aiIntegrations.value,
+          isPublicView.value || !isDataEditAllowed.value || isSqlView.value,
+        )
 
         const sqlUi = sqlUis.value[f.source_id] ?? Object.values(sqlUis.value)[0]
 
@@ -351,7 +357,8 @@ export function useCanvasTable({
         activeCell.value.column !== null &&
         fields.value[activeCell.value.column - 1] &&
         totalRows.value &&
-        !isSelectionReadOnly.value
+        !isSelectionReadOnly.value &&
+        !isSqlView.value
       ),
   )
 
@@ -648,6 +655,7 @@ export function useCanvasTable({
     bulkUpsertRows,
     fetchChunk,
     updateOrSaveRow,
+    getRows,
   })
 
   const { handleFillEnd, handleFillMove, handleFillStart } = useFillHandler({
@@ -834,9 +842,7 @@ export function useCanvasTable({
     const endCol = Math.max(start.col, end.col)
 
     const cols = columns.value.slice(startCol, endCol + 1)
-    // Get rows in the selected range
-    const rows = Array.from(cachedRows.value.values()).slice(start.row, end.row + 1)
-
+    const rows = await getRows(start.row, end.row)
     const props = []
     let isInfoShown = false
 
@@ -855,6 +861,8 @@ export function useCanvasTable({
 
         // skip readonly columns
         if (isReadonly(colObj)) continue
+
+        if (colObj.readonly) continue
 
         row.row[colObj.title] = null
         props.push(colObj.title)
@@ -924,7 +932,7 @@ export function useCanvasTable({
       column,
       row,
       minHeight: rowHeight.value,
-      height: column.uidt === UITypes.LongText ? 'auto' : rowHeight.value + 2,
+      height: [UITypes.LongText, UITypes.Formula].includes(column.uidt) ? 'auto' : rowHeight.value + 2,
       width: parseCellWidth(clickedColumn.width) + 2,
       fixed: clickedColumn.fixed,
     }
@@ -949,6 +957,7 @@ export function useCanvasTable({
           UITypes.Barcode,
           UITypes.QrCode,
           UITypes.LinkToAnotherRecord,
+          UITypes.Formula,
         ].includes(column.uidt)
       ) {
         makeEditable(row, clickedColumn)
@@ -977,6 +986,11 @@ export function useCanvasTable({
       return null
     }
 
+    if (column.readonly) {
+      message.info(t('msg.info.fieldReadonly'))
+      return null
+    }
+
     makeEditable(row, clickedColumn)
   }
 
@@ -999,7 +1013,7 @@ export function useCanvasTable({
     async () => {
       if (!fetchMetaIds.value.length) return
 
-      await Promise.all(fetchMetaIds.value.map(async (id) => getMeta(id)))
+      await Promise.all(fetchMetaIds.value.map(async (id) => getMeta(id, false, false, undefined, true)))
       fetchMetaIds.value = []
       triggerRefreshCanvas()
     },

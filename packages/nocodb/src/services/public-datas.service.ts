@@ -1,8 +1,9 @@
 import { forwardRef, Inject, Injectable } from '@nestjs/common';
-import { UITypes, ViewTypes } from 'nocodb-sdk';
+import { ncIsArray, UITypes, ViewTypes } from 'nocodb-sdk';
 import type { NcRequest } from 'nocodb-sdk';
 import type { LinkToAnotherRecordColumn } from '~/models';
 import type { NcContext } from '~/interface/config';
+import type { DependantFields } from '~/helpers/getAst';
 import { nocoExecute } from '~/utils';
 import { Column, Model, Source, View } from '~/models';
 import { NcError } from '~/helpers/catchError';
@@ -537,6 +538,26 @@ export class PublicDatasService {
       extractOnlyPrimaries: true,
     });
 
+    const listArgs: DependantFields & {
+      filterArr?: Filter[];
+      filterArrJson?: string;
+    } = dependencyFields;
+
+    try {
+      if (listArgs.filterArrJson)
+        listArgs.filterArr = JSON.parse(listArgs.filterArrJson) as Filter[];
+    } catch (e) {}
+
+    if (view.type === ViewTypes.FORM && ncIsArray(param.query?.fields)) {
+      param.query.fields.forEach(listArgs.fieldsSet.add, listArgs.fieldsSet);
+
+      param.query.fields.forEach((f) => {
+        if (ast[f] === undefined) {
+          ast[f] = 1;
+        }
+      });
+    }
+
     let data = [];
 
     let count = 0;
@@ -558,14 +579,14 @@ export class PublicDatasService {
       data = data = await nocoExecute(
         ast,
         await baseModel.list({
-          ...dependencyFields,
+          ...listArgs,
           customConditions,
         }),
         {},
-        dependencyFields,
+        listArgs,
       );
       count = await baseModel.count({
-        ...dependencyFields,
+        ...listArgs,
         customConditions,
       } as any);
     } catch (e) {

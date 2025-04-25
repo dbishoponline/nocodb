@@ -17,6 +17,7 @@ export {
   isNumericCol,
   isVirtualCol,
   isLinksOrLTAR,
+  isSelfLinkCol,
   isCreatedOrLastModifiedTimeCol,
   isCreatedOrLastModifiedByCol,
   isHiddenCol,
@@ -32,6 +33,8 @@ export {
   checkboxIconList,
   ratingIconList,
   durationOptions,
+  isReadOnlyColumn,
+  isDateOrDateTimeCol,
 } from '~/lib/UITypes';
 export { default as CustomAPI, FileType } from '~/lib/CustomAPI';
 export { default as TemplateGenerator } from '~/lib/TemplateGenerator';
@@ -50,3 +53,7 @@ export * from '~/lib/ncTypes';
 export * from '~/lib/import-export-data';
 export * from '~/lib/is';
 export * from '~/lib/durationUtils';
+export * from '~/lib/sync';
+export * from '~/lib/columnHelper';
+export * from '~/lib/error';
+export * from '~/lib/geoDataUtils';

@@ -1,13 +1,25 @@
-import { RelationTypes } from 'nocodb-sdk';
-import type { Column, LinkToAnotherRecordColumn } from '~/models';
+import { type NcContext, RelationTypes } from 'nocodb-sdk';
+import type CustomKnex from 'src/db/CustomKnex';
+import type { Knex } from 'knex';
+import NcConnectionMgrv2 from '~/utils/common/NcConnectionMgrv2';
+import {
+  type Column,
+  type LinkToAnotherRecordColumn,
+  Model,
+  Source,
+} from '~/models';
 import { NcError } from '~/helpers/catchError';
+
+export function concatKnexRaw(knex: CustomKnex, raws: Knex.Raw[]) {
+  return knex.raw(raws.map(() => '?').join(' '), raws);
+}
 
 export function _wherePk(
   primaryKeys: Column[],
   id: unknown | unknown[],
   skipPkValidation = false,
 ) {
-  const where = {};
+  const where: Record<string, unknown> = {};
 
   // if id object is provided use as it is
   if (id && typeof id === 'object' && !Array.isArray(id)) {
@@ -116,4 +128,52 @@ export function getOppositeRelationType(
     return RelationTypes.HAS_MANY;
   }
   return type as RelationTypes;
+}
+
+export async function getBaseModelSqlFromModelId({
+  modelId,
+  context,
+}: {
+  context: NcContext;
+  modelId: string;
+}) {
+  const model = await Model.get(context, modelId);
+  const source = await Source.get(context, model.source_id);
+  return await Model.getBaseModelSQL(context, {
+    id: model.id,
+    dbDriver: await NcConnectionMgrv2.get(source),
+    source,
+  });
+}
+
+// Audit logging is enabled by default unless explicitly disabled using NC_DISABLE_AUDIT=true
+export function isDataAuditEnabled() {
+  return process.env.NC_DISABLE_AUDIT !== 'true';
+}
+
+export function getRelatedLinksColumn(
+  column: Column<LinkToAnotherRecordColumn>,
+  relatedModel: Model,
+) {
+  return relatedModel.columns.find((c: Column) => {
+    if (column.colOptions?.type === RelationTypes.MANY_TO_MANY) {
+      return (
+        column.colOptions.fk_mm_child_column_id ===
+          c.colOptions?.fk_mm_parent_column_id &&
+        column.colOptions.fk_mm_parent_column_id ===
+          c.colOptions?.fk_mm_child_column_id
+      );
+    } else {
+      return (
+        column.colOptions.fk_child_column_id ===
+          c.colOptions?.fk_child_column_id &&
+        column.colOptions.fk_parent_column_id ===
+          c.colOptions?.fk_parent_column_id
+      );
+    }
+  });
+}
+
+export function extractIdPropIfObjectOrReturn(id: any, prop: string) {
+  return typeof id === 'object' ? id[prop] : id;
 }

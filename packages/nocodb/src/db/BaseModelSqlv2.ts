@@ -22,7 +22,9 @@ import {
   isVirtualCol,
   LongTextAiMetaProp,
   NcErrorType,
+  ncIsNull,
   ncIsObject,
+  ncIsUndefined,
   RelationTypes,
   UITypes,
 } from 'nocodb-sdk';
@@ -31,6 +33,7 @@ import { customAlphabet } from 'nanoid';
 import { v4 as uuidv4 } from 'uuid';
 import { Logger } from '@nestjs/common';
 import { NcApiVersion } from 'nocodb-sdk';
+import { NestedLinkPreparator } from './BaseModelSqlv2/nested-link-preparator';
 import type { IBaseModelSqlV2 } from '~/db/IBaseModelSqlV2';
 import type {
   BulkAuditV1OperationTypes,
@@ -83,8 +86,6 @@ import {
 import {
   extractExcludedColumnNames,
   getAliasGenerator,
-  isEE,
-  isOnPrem,
   nocoExecute,
   populateUpdatePayloadDiff,
 } from '~/utils';
@@ -116,6 +117,8 @@ import {
   _wherePk,
   getCompositePkValue,
   getOppositeRelationType,
+  getRelatedLinksColumn,
+  isDataAuditEnabled as isDataAuditEnabledFn,
 } from '~/helpers/dbHelpers';
 
 dayjs.extend(utc);
@@ -380,6 +383,9 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
       data = await baseModel.readByPk(...rest);
     }
 
+    // load columns if not loaded already
+    await model.getCachedColumns(this.context);
+
     if (extractDisplayValueData) {
       return data ? data[model.displayValue.title] ?? null : '';
     }
@@ -444,7 +450,11 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
       columns,
     );
     const sorts = extractSortsObject(rest?.sort, aliasColObjMap);
-    const filterObj = extractFilterFromXwhere(where, aliasColObjMap);
+    const { filters: filterObj } = extractFilterFromXwhere(
+      this.context,
+      where,
+      aliasColObjMap,
+    );
 
     await conditionV2(
       this,
@@ -547,7 +557,8 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
       aliasColObjMap,
       throwErrorIfInvalidParams,
     );
-    const filterObj = extractFilterFromXwhere(
+    const { filters: filterObj } = extractFilterFromXwhere(
+      this.context,
       where,
       aliasColObjMap,
       throwErrorIfInvalidParams,
@@ -703,7 +714,8 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
       this.context,
       columns,
     );
-    const filterObj = extractFilterFromXwhere(
+    const { filters: filterObj } = extractFilterFromXwhere(
+      this.context,
       where,
       aliasColObjMap,
       throwErrorIfInvalidParams,
@@ -821,7 +833,11 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
       columns,
     );
 
-    const filterObj = extractFilterFromXwhere(where, aliasColObjMap);
+    const { filters: filterObj } = extractFilterFromXwhere(
+      this.context,
+      where,
+      aliasColObjMap,
+    );
     await conditionV2(
       this,
       [
@@ -883,7 +899,11 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
         const groupByColumns: Record<string, Column> = {};
 
         const getAlias = getAliasGenerator('__nc_gb');
-        const groupFilter = extractFilterFromXwhere(f.where, aliasColObjMap);
+        const { filters: groupFilter } = extractFilterFromXwhere(
+          this.context,
+          f.where,
+          aliasColObjMap,
+        );
 
         const tQb = this.dbDriver(this.tnPath);
         const colSelectors = [];
@@ -1071,7 +1091,11 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
               logical_op: 'and',
             }),
             new Filter({
-              children: extractFilterFromXwhere(where, aliasColObjMap),
+              children: extractFilterFromXwhere(
+                this.context,
+                where,
+                aliasColObjMap,
+              ).filters,
               is_group: true,
               logical_op: 'and',
             }),
@@ -1186,7 +1210,11 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
         const groupByColumns: Record<string, Column> = {};
 
         const getAlias = getAliasGenerator('__nc_gb');
-        const groupFilter = extractFilterFromXwhere(f?.where, aliasColObjMap);
+        const { filters: groupFilter } = extractFilterFromXwhere(
+          this.context,
+          f?.where,
+          aliasColObjMap,
+        );
         let groupSort = extractSortsObject(rest?.sort, aliasColObjMap);
 
         const tQb = this.dbDriver(this.tnPath);
@@ -1387,7 +1415,11 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
               logical_op: 'and',
             }),
             new Filter({
-              children: extractFilterFromXwhere(where, aliasColObjMap),
+              children: extractFilterFromXwhere(
+                this.context,
+                where,
+                aliasColObjMap,
+              ).filters,
               is_group: true,
               logical_op: 'and',
             }),
@@ -1621,7 +1653,11 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
       // Generate a knex raw query for each filter in the bulkFilterList
       for (const f of bulkFilterList) {
         const tQb = this.dbDriver(this.tnPath);
-        const aggFilter = extractFilterFromXwhere(f.where, aliasColObjMap);
+        const { filters: aggFilter } = extractFilterFromXwhere(
+          this.context,
+          f.where,
+          aliasColObjMap,
+        );
         let aggFilterJson = f.filterArrJson;
         try {
           aggFilterJson = JSON.parse(aggFilterJson as any);
@@ -1644,7 +1680,11 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
               logical_op: 'and',
             }),
             new Filter({
-              children: extractFilterFromXwhere(where, aliasColObjMap),
+              children: extractFilterFromXwhere(
+                this.context,
+                where,
+                aliasColObjMap,
+              ).filters,
               is_group: true,
               logical_op: 'and',
             }),
@@ -1765,7 +1805,11 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
       const qb = this.dbDriver(this.tnPath);
 
       // Apply filers from view configuration, filterArr and where parameter
-      const filterObj = extractFilterFromXwhere(where, aliasColObjMap);
+      const { filters: filterObj } = extractFilterFromXwhere(
+        this.context,
+        where,
+        aliasColObjMap,
+      );
       await conditionV2(
         this,
         [
@@ -2048,7 +2092,11 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
 
     let sorts = extractSortsObject(rest?.sort, aliasColObjMap);
 
-    const filterObj = extractFilterFromXwhere(where, aliasColObjMap);
+    const { filters: filterObj } = extractFilterFromXwhere(
+      this.context,
+      where,
+      aliasColObjMap,
+    );
     await conditionV2(
       this,
       [
@@ -2343,7 +2391,11 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
       columns,
     );
 
-    const filterObj = extractFilterFromXwhere(where, aliasColObjMap);
+    const { filters: filterObj } = extractFilterFromXwhere(
+      this.context,
+      where,
+      aliasColObjMap,
+    );
     await conditionV2(
       this,
       [
@@ -2406,17 +2458,12 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
         (c) => c.id === colId,
       );
 
-      const chilCol = await (
-        (await relColumn.getColOptions(
-          this.context,
-        )) as LinkToAnotherRecordColumn
-      ).getChildColumn(this.context);
+      const relationColOpts = (await relColumn.getColOptions(
+        this.context,
+      )) as LinkToAnotherRecordColumn;
+      const chilCol = await relationColOpts.getChildColumn(this.context);
       const childTable = await chilCol.getModel(this.context);
-      const parentCol = await (
-        (await relColumn.getColOptions(
-          this.context,
-        )) as LinkToAnotherRecordColumn
-      ).getParentColumn(this.context);
+      const parentCol = await relationColOpts.getParentColumn(this.context);
       const parentTable = await parentCol.getModel(this.context);
       const childModel = await Model.getBaseModelSQL(this.context, {
         model: childTable,
@@ -2433,8 +2480,17 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
         extractPkAndPv: true,
         fieldsSet: args.fieldsSet,
       });
-      await this.applySortAndFilter({ table: childTable, where, qb, sort });
-
+      const view = relationColOpts.fk_target_view_id
+        ? await View.get(this.context, relationColOpts.fk_target_view_id)
+        : await View.getDefaultView(this.context, childModel.model.id);
+      await this.applySortAndFilter({
+        table: childTable,
+        where,
+        qb,
+        sort,
+        view,
+        skipViewFilter: true,
+      });
       const childQb = this.dbDriver.queryBuilder().from(
         this.dbDriver
           .unionAll(
@@ -2568,8 +2624,16 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
       view,
       qb,
       sort,
-      onlySort: true,
+      skipViewFilter: true,
     });
+
+    if (!sort || sort === '') {
+      const view = relColOptions.fk_target_view_id
+        ? await View.get(this.context, relColOptions.fk_target_view_id)
+        : await View.getDefaultView(this.context, childTable.id);
+      const childSorts = await view.getSorts(this.context);
+      await sortV2(childModel, childSorts, qb);
+    }
 
     // todo: sanitize
     if (!selectAllRecords) {
@@ -2667,18 +2731,12 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
       const relColumn = (await this.model.getColumns(this.context)).find(
         (c) => c.id === colId,
       );
-
-      const chilCol = await (
-        (await relColumn.getColOptions(
-          this.context,
-        )) as LinkToAnotherRecordColumn
-      ).getChildColumn(this.context);
+      const relationColOpts = (await relColumn.getColOptions(
+        this.context,
+      )) as LinkToAnotherRecordColumn;
+      const chilCol = await relationColOpts.getChildColumn(this.context);
       const childTable = await chilCol.getModel(this.context);
-      const parentCol = await (
-        (await relColumn.getColOptions(
-          this.context,
-        )) as LinkToAnotherRecordColumn
-      ).getParentColumn(this.context);
+      const parentCol = await relationColOpts.getParentColumn(this.context);
       const parentTable = await parentCol.getModel(this.context);
       const childBaseModel = await Model.getBaseModelSQL(this.context, {
         model: childTable,
@@ -2719,7 +2777,7 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
         qb,
         sort,
         view,
-        onlySort: true,
+        skipViewFilter: true,
       });
 
       const children = await this.execAndParse(
@@ -2780,7 +2838,11 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
             .where(_wherePk(parentTable.primaryKeys, id)),
         );
       const aliasColObjMap = await childTable.getAliasColObjMap(this.context);
-      const filterObj = extractFilterFromXwhere(where, aliasColObjMap);
+      const { filters: filterObj } = extractFilterFromXwhere(
+        this.context,
+        where,
+        aliasColObjMap,
+      );
 
       await conditionV2(
         this,
@@ -2863,11 +2925,16 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
 
     await childModel.selectObject({ qb, fieldsSet: args.fieldsSet });
 
+    const view = relColOptions.fk_target_view_id
+      ? await View.get(this.context, relColOptions.fk_target_view_id)
+      : await View.getDefaultView(this.context, childTable.id);
     await this.applySortAndFilter({
       table: childTable,
       where,
       qb,
       sort,
+      view,
+      skipViewFilter: true,
     });
 
     const finalQb = this.dbDriver.unionAll(
@@ -2888,7 +2955,6 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
             (apiVersion === NcApiVersion.V3 && nested ? 1 : 0),
         );
         query.offset(+rest?.offset || 0);
-
         return this.isSqlite ? this.dbDriver.select().from(query) : query;
       }),
       !this.isSqlite,
@@ -3000,7 +3066,11 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
       });
 
     const aliasColObjMap = await childTable.getAliasColObjMap(this.context);
-    const filterObj = extractFilterFromXwhere(where, aliasColObjMap);
+    const { filters: filterObj } = extractFilterFromXwhere(
+      this.context,
+      where,
+      aliasColObjMap,
+    );
 
     await this.getCustomConditionsAndApply({
       column: relColumn,
@@ -3139,7 +3209,11 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
           .where(_wherePk(parentTable.primaryKeys, parentId)),
       );
     const aliasColObjMap = await childTable.getAliasColObjMap(this.context);
-    const filterObj = extractFilterFromXwhere(where, aliasColObjMap);
+    const { filters: filterObj } = extractFilterFromXwhere(
+      this.context,
+      where,
+      aliasColObjMap,
+    );
 
     await conditionV2(
       this,
@@ -3247,7 +3321,11 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
     });
 
     const aliasColObjMap = await childTable.getAliasColObjMap(this.context);
-    const filterObj = extractFilterFromXwhere(where, aliasColObjMap);
+    const { filters: filterObj } = extractFilterFromXwhere(
+      this.context,
+      where,
+      aliasColObjMap,
+    );
 
     await this.getCustomConditionsAndApply({
       column: relColumn,
@@ -3264,6 +3342,7 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
       qb,
       sort,
       where,
+      // condition is applied in getCustomConditionsAndApply and we don't want to apply it again
       onlySort: true,
     });
 
@@ -3339,7 +3418,11 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
     await childBaseModel.selectObject({ qb });
 
     const aliasColObjMap = await childTable.getAliasColObjMap(this.context);
-    const filterObj = extractFilterFromXwhere(where, aliasColObjMap);
+    const { filters: filterObj } = extractFilterFromXwhere(
+      this.context,
+      where,
+      aliasColObjMap,
+    );
     await this.getCustomConditionsAndApply({
       column: relColumn,
       view: relColOptions.fk_target_view_id ? childView : null,
@@ -3354,6 +3437,7 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
       qb,
       sort,
       where,
+      // condition is applied in getCustomConditionsAndApply and we don't want to apply it again
       onlySort: true,
     });
 
@@ -3420,7 +3504,11 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
       });
 
     const aliasColObjMap = await childTable.getAliasColObjMap(this.context);
-    const filterObj = extractFilterFromXwhere(where, aliasColObjMap);
+    const { filters: filterObj } = extractFilterFromXwhere(
+      this.context,
+      where,
+      aliasColObjMap,
+    );
 
     await this.getCustomConditionsAndApply({
       column: relColumn,
@@ -3517,7 +3605,11 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
       ? parentTable
       : childTable
     ).getAliasColObjMap(this.context);
-    const filterObj = extractFilterFromXwhere(where, aliasColObjMap);
+    const { filters: filterObj } = extractFilterFromXwhere(
+      this.context,
+      where,
+      aliasColObjMap,
+    );
 
     await this.getCustomConditionsAndApply({
       column: relColumn,
@@ -3534,6 +3626,7 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
       qb,
       sort,
       where,
+      // condition is applied in getCustomConditionsAndApply and we don't want to apply it again
       onlySort: true,
     });
 
@@ -3599,7 +3692,11 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
       .count(`*`, { as: 'count' });
 
     const aliasColObjMap = await parentTable.getAliasColObjMap(this.context);
-    const filterObj = extractFilterFromXwhere(where, aliasColObjMap);
+    const { filters: filterObj } = extractFilterFromXwhere(
+      this.context,
+      where,
+      aliasColObjMap,
+    );
 
     const targetView = await relColOptions.getChildView(this.context);
 
@@ -3679,7 +3776,11 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
       : childTable
     ).getAliasColObjMap(this.context);
 
-    const filterObj = extractFilterFromXwhere(where, aliasColObjMap);
+    const { filters: filterObj } = extractFilterFromXwhere(
+      this.context,
+      where,
+      aliasColObjMap,
+    );
 
     await this.getCustomConditionsAndApply({
       column: relColumn,
@@ -3745,7 +3846,11 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
     await parentBaseModel.selectObject({ qb });
 
     const aliasColObjMap = await parentTable.getAliasColObjMap(this.context);
-    const filterObj = extractFilterFromXwhere(where, aliasColObjMap);
+    const { filters: filterObj } = extractFilterFromXwhere(
+      this.context,
+      where,
+      aliasColObjMap,
+    );
 
     const targetView = await relColOptions.getChildView(
       this.context,
@@ -3766,6 +3871,7 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
       qb,
       sort,
       where,
+      // condition is applied in getCustomConditionsAndApply and we don't want to apply it again
       onlySort: true,
     });
 
@@ -3790,6 +3896,7 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
     qb,
     sort,
     onlySort = false,
+    skipViewFilter = false,
   }: {
     table: Model;
     view?: View;
@@ -3797,15 +3904,20 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
     qb;
     sort: string;
     onlySort?: boolean;
+    skipViewFilter?: boolean;
   }) {
     const childAliasColMap = await table.getAliasColObjMap(this.context);
 
     if (!onlySort) {
-      const filter = extractFilterFromXwhere(where, childAliasColMap);
+      const { filters: filter } = extractFilterFromXwhere(
+        this.context,
+        where,
+        childAliasColMap,
+      );
       await conditionV2(
         this,
         [
-          ...(view
+          ...(view && !skipViewFilter
             ? [
                 new Filter({
                   children:
@@ -3816,7 +3928,7 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
                 }),
               ]
             : []),
-          ...filter,
+          ...(filter || []),
         ],
         qb,
       );
@@ -5371,336 +5483,13 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
     return rowId;
   }
 
-  protected async prepareNestedLinkQb({
-    nestedCols,
-    data,
-    insertObj,
-    req,
-  }: {
+  protected async prepareNestedLinkQb(param: {
     nestedCols: Column[];
     data: Record<string, any>;
     insertObj: Record<string, any>;
     req: NcRequest;
   }) {
-    const postInsertOps: ((rowId: any) => Promise<string>)[] = [];
-    const preInsertOps: (() => Promise<string>)[] = [];
-    const postInsertAuditOps: ((rowId: any) => Promise<void>)[] = [];
-    for (const col of nestedCols) {
-      if (col.title in data) {
-        const colOptions = await col.getColOptions<LinkToAnotherRecordColumn>(
-          this.context,
-        );
-
-        const refModel = await Model.get(
-          this.context,
-          (colOptions as LinkToAnotherRecordColumn).fk_related_model_id,
-        );
-        await refModel.getCachedColumns(this.context);
-        const refModelPkCol = await refModel.primaryKey;
-        const refChildCol = getRelatedLinksColumn(col, refModel);
-
-        // parse data if it's JSON string
-        let nestedData;
-        try {
-          nestedData =
-            typeof data[col.title] === 'string'
-              ? JSON.parse(data[col.title])
-              : data[col.title];
-          if (nestedData.length === 0) {
-            continue;
-          }
-        } catch {
-          continue;
-        }
-
-        switch (colOptions.type) {
-          case RelationTypes.BELONGS_TO:
-            {
-              if (Array.isArray(nestedData)) {
-                nestedData = nestedData[0];
-              }
-
-              const childCol = await colOptions.getChildColumn(this.context);
-              const parentCol = await colOptions.getParentColumn(this.context);
-              insertObj[childCol.column_name] = extractIdPropIfObjectOrReturn(
-                nestedData,
-                parentCol.title,
-              );
-              const refModel = await parentCol.getModel(this.context);
-              postInsertAuditOps.push(async (rowId) => {
-                await this.afterAddChild({
-                  columnTitle: col.title,
-                  columnId: col.id,
-                  refColumnTitle: refChildCol.title,
-                  rowId,
-                  refRowId: nestedData?.[refModelPkCol.title],
-                  req,
-                  model: this.model,
-                  refModel,
-                  refDisplayValue: '',
-                  displayValue: '',
-                  type: RelationTypes.BELONGS_TO,
-                });
-
-                await this.afterAddChild({
-                  columnTitle: refChildCol.title,
-                  columnId: refChildCol.id,
-                  refColumnTitle: col.title,
-                  rowId: nestedData?.[refModelPkCol.title],
-                  refRowId: rowId,
-                  req,
-                  model: refModel,
-                  refModel: this.model,
-                  refDisplayValue: '',
-                  displayValue: '',
-                  type: RelationTypes.HAS_MANY,
-                });
-              });
-            }
-            break;
-          case RelationTypes.ONE_TO_ONE:
-            {
-              if (Array.isArray(nestedData)) {
-                nestedData = nestedData[0];
-              }
-
-              const isBt = col.meta?.bt;
-
-              const childCol = await colOptions.getChildColumn(this.context);
-              const childModel = await childCol.getModel(this.context);
-              await childModel.getColumns(this.context);
-
-              let refRowId;
-
-              if (isBt) {
-                // if array then extract value from first element
-                refRowId = Array.isArray(nestedData)
-                  ? nestedData[0]?.[childModel.primaryKey.title]
-                  : nestedData[childModel.primaryKey.title];
-
-                // todo: unlink the ref record
-                preInsertOps.push(async () => {
-                  const res = this.dbDriver(
-                    this.getTnPath(childModel.table_name),
-                  )
-                    .update({
-                      [childCol.column_name]: null,
-                    })
-                    .where(childCol.column_name, refRowId)
-                    .toQuery();
-
-                  return res;
-                });
-
-                const childCol = await colOptions.getChildColumn(this.context);
-                const parentCol = await colOptions.getParentColumn(
-                  this.context,
-                );
-
-                insertObj[childCol.column_name] = extractIdPropIfObjectOrReturn(
-                  nestedData,
-                  parentCol.title,
-                );
-              } else {
-                const parentCol = await colOptions.getParentColumn(
-                  this.context,
-                );
-                const parentModel = await parentCol.getModel(this.context);
-                await parentModel.getColumns(this.context);
-                refRowId = nestedData[childModel.primaryKey.title];
-
-                postInsertOps.push(async (rowId) => {
-                  let refId = rowId;
-                  if (parentModel.primaryKey.id !== parentCol.id) {
-                    refId = this.dbDriver(
-                      this.getTnPath(parentModel.table_name),
-                    )
-                      .select(parentCol.column_name)
-                      .where(parentModel.primaryKey.column_name, rowId)
-                      .first();
-                  }
-
-                  const linkRecId = extractIdPropIfObjectOrReturn(
-                    nestedData,
-                    childModel.primaryKey.title,
-                  );
-
-                  return this.dbDriver(this.getTnPath(childModel.table_name))
-                    .update({
-                      [childCol.column_name]: refId,
-                    })
-                    .where(childModel.primaryKey.column_name, linkRecId)
-                    .toQuery();
-                });
-              }
-
-              postInsertAuditOps.push(async (rowId) => {
-                await this.afterAddChild({
-                  columnTitle: col.title,
-                  columnId: col.id,
-                  refColumnTitle: refChildCol.title,
-                  rowId,
-                  refRowId: nestedData[refModelPkCol?.title],
-                  req,
-                  model: this.model,
-                  refModel,
-                  refDisplayValue: '',
-                  displayValue: '',
-                  type: RelationTypes.ONE_TO_ONE,
-                });
-
-                await this.afterAddChild({
-                  columnTitle: refChildCol.title,
-                  columnId: refChildCol.id,
-                  refColumnTitle: col.title,
-                  rowId: nestedData[refModelPkCol?.title],
-                  refRowId: rowId,
-                  req,
-                  model: refModel,
-                  refModel: this.model,
-                  refDisplayValue: '',
-                  displayValue: '',
-                  type: RelationTypes.ONE_TO_ONE,
-                });
-              });
-            }
-            break;
-          case RelationTypes.HAS_MANY:
-            {
-              if (!Array.isArray(nestedData)) continue;
-              const childCol = await colOptions.getChildColumn(this.context);
-              const parentCol = await colOptions.getParentColumn(this.context);
-              const childModel = await childCol.getModel(this.context);
-              const parentModel = await parentCol.getModel(this.context);
-              await childModel.getColumns(this.context);
-              await parentModel.getColumns(this.context);
-
-              postInsertOps.push(async (rowId) => {
-                let refId = rowId;
-                if (parentModel.primaryKey.id !== parentCol.id) {
-                  refId = this.dbDriver(this.getTnPath(parentModel.table_name))
-                    .select(parentCol.column_name)
-                    .where(parentModel.primaryKey.column_name, rowId)
-                    .first();
-                }
-                return this.dbDriver(this.getTnPath(childModel.table_name))
-                  .update({
-                    [childCol.column_name]: refId,
-                  })
-                  .whereIn(
-                    childModel.primaryKey.column_name,
-                    nestedData?.map((r) =>
-                      extractIdPropIfObjectOrReturn(
-                        r,
-                        childModel.primaryKey.title,
-                      ),
-                    ),
-                  )
-                  .toQuery();
-              });
-
-              postInsertAuditOps.push(async (rowId) => {
-                for (const nestedDataObj of Array.isArray(nestedData)
-                  ? nestedData
-                  : [nestedData]) {
-                  if (nestedDataObj === undefined) continue;
-                  await this.afterAddChild({
-                    columnTitle: col.title,
-                    columnId: col.id,
-                    refColumnTitle: refChildCol.title,
-                    rowId,
-                    refRowId: nestedDataObj[refModelPkCol?.title],
-                    req,
-                    model: this.model,
-                    refModel,
-                    refDisplayValue: '',
-                    displayValue: '',
-                    type: RelationTypes.HAS_MANY,
-                  });
-
-                  await this.afterAddChild({
-                    columnTitle: refChildCol.title,
-                    columnId: refChildCol.id,
-                    refColumnTitle: col.title,
-                    rowId: nestedDataObj[refModelPkCol?.title],
-                    refRowId: rowId,
-                    req,
-                    model: refModel,
-                    refModel: this.model,
-                    refDisplayValue: '',
-                    displayValue: '',
-                    type: RelationTypes.BELONGS_TO,
-                  });
-                }
-              });
-            }
-            break;
-          case RelationTypes.MANY_TO_MANY: {
-            if (!Array.isArray(nestedData)) continue;
-            postInsertOps.push(async (rowId) => {
-              const parentModel = await colOptions
-                .getParentColumn(this.context)
-                .then((c) => c.getModel(this.context));
-              await parentModel.getColumns(this.context);
-              const parentMMCol = await colOptions.getMMParentColumn(
-                this.context,
-              );
-              const childMMCol = await colOptions.getMMChildColumn(
-                this.context,
-              );
-              const mmModel = await colOptions.getMMModel(this.context);
-
-              const rows = nestedData.map((r) => ({
-                [parentMMCol.column_name]: extractIdPropIfObjectOrReturn(
-                  r,
-                  parentModel.primaryKey.title,
-                ),
-                [childMMCol.column_name]: rowId,
-              }));
-              return this.dbDriver(this.getTnPath(mmModel.table_name))
-                .insert(rows)
-                .toQuery();
-            });
-
-            postInsertAuditOps.push(async (rowId) => {
-              for (const nestedDataObj of Array.isArray(nestedData)
-                ? nestedData
-                : [nestedData]) {
-                if (nestedDataObj === undefined) continue;
-                await this.afterAddChild({
-                  columnTitle: col.title,
-                  columnId: col.id,
-                  refColumnTitle: refChildCol.title,
-                  rowId,
-                  refRowId: nestedDataObj[refModelPkCol?.title],
-                  req,
-                  model: this.model,
-                  refModel,
-                  refDisplayValue: '',
-                  displayValue: '',
-                  type: RelationTypes.MANY_TO_MANY,
-                });
-
-                await this.afterAddChild({
-                  columnTitle: refChildCol.title,
-                  columnId: refChildCol.id,
-                  refColumnTitle: col.title,
-                  rowId: nestedDataObj[refModelPkCol?.title],
-                  refRowId: rowId,
-                  req,
-                  model: refModel,
-                  refModel: this.model,
-                  refDisplayValue: '',
-                  displayValue: '',
-                  type: RelationTypes.MANY_TO_MANY,
-                });
-              }
-            });
-          }
-        }
-      }
-    }
-    return { postInsertOps, preInsertOps, postInsertAuditOps };
+    return new NestedLinkPreparator().prepareNestedLinkQb(this, param);
   }
 
   async bulkUpsert(
@@ -5751,7 +5540,7 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
       const dataWithoutPks = [];
 
       for (const data of preparedDatas) {
-        const pkValues = this.extractPksValues(data);
+        const pkValues = this.extractPksValues(data, true);
         if (pkValues !== 'N/A' && pkValues !== undefined) {
           dataWithPks.push({ pk: pkValues, data });
         } else {
@@ -5990,6 +5779,12 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
           );
         }
 
+        if (!allowSystemColumn && col.readonly) {
+          NcError.badRequest(
+            `Column "${col.title}" is readonly column and cannot be updated`,
+          );
+        }
+
         if (
           col.system &&
           !allowSystemColumn &&
@@ -6209,7 +6004,9 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
       }
 
       if ('beforeBulkInsert' in this) {
-        await this.beforeBulkInsert(insertDatas, trx, cookie);
+        await this.beforeBulkInsert(insertDatas, trx, cookie, {
+          allowSystemColumn,
+        });
       }
 
       // await this.beforeInsertb(insertDatas, null);
@@ -6332,23 +6129,27 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
       raw = false,
       throwExceptionIfNotExist = false,
       isSingleRecordUpdation = false,
+      allowSystemColumn = false,
       apiVersion,
     }: {
       cookie?: any;
       raw?: boolean;
       throwExceptionIfNotExist?: boolean;
       isSingleRecordUpdation?: boolean;
+      allowSystemColumn?: boolean;
       apiVersion?: NcApiVersion;
     } = {},
   ) {
     let transaction;
+    const readChunkSize = 100;
+
     try {
       const columns = await this.model.getColumns(this.context);
 
       // validate update data
       if (!raw) {
         for (const d of datas) {
-          await this.validate(d, columns);
+          await this.validate(d, columns, { allowSystemColumn });
         }
       }
 
@@ -6370,77 +6171,50 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
       const newData = [];
       const updatePkValues = [];
       const toBeUpdated = [];
-      const pkAndData: { pk: any; data: any }[] = [];
-      const readChunkSize = 100;
-      for (const [i, d] of updateDatas.entries()) {
-        const pkValues = getCompositePkValue(
-          this.model.primaryKeys,
-          this.extractPksValues(d),
-        );
+      const pkAndData: { pk: string; data: any }[] = [];
+
+      for (const d of updateDatas) {
+        const pkValues = this.extractPksValues(d, true);
+
         if (!pkValues) {
-          // throw or skip if no pk provided
-          if (throwExceptionIfNotExist) {
-            NcError.recordNotFound(pkValues);
-          }
+          if (throwExceptionIfNotExist) NcError.recordNotFound(pkValues);
           continue;
         }
-        if (!raw) {
-          pkAndData.push({
-            pk: pkValues,
-            data: d,
-          });
 
-          if (
-            pkAndData.length >= readChunkSize ||
-            i === updateDatas.length - 1
-          ) {
-            const tempToRead = pkAndData.splice(0, pkAndData.length);
-            const oldRecords = await this.chunkList({
-              pks: tempToRead.map((v) => v.pk),
-            });
+        pkAndData.push({ pk: pkValues, data: d });
+      }
 
-            for (const record of tempToRead) {
-              const oldRecord = oldRecords.find((r) =>
-                this.comparePks(this.extractPksValues(r), record.pk),
-              );
+      for (let i = 0; i < pkAndData.length; i += readChunkSize) {
+        const chunk = pkAndData.slice(i, i + readChunkSize);
+        const pksToRead = chunk.map((v) => v.pk);
 
-              if (!oldRecord) {
-                // throw or skip if no record found
-                if (throwExceptionIfNotExist) {
-                  NcError.recordNotFound(record);
-                }
-                continue;
-              }
+        const oldRecords = await this.chunkList({ pks: pksToRead });
+        const oldRecordsMap = new Map<string, any>(
+          oldRecords.map((r) => [this.extractPksValues(r, true), r]),
+        );
 
-              await this.prepareNocoData(record.data, false, cookie, oldRecord);
+        for (const { pk, data } of chunk) {
+          const oldRecord = oldRecordsMap.get(pk);
 
-              prevData.push(oldRecord);
-            }
-
-            for (let i = 0; i < tempToRead.length; i++) {
-              const { pk, data } = tempToRead[i];
-              const wherePk = await this._wherePk(pk, true);
-              toBeUpdated.push({ d: data, wherePk });
-              updatePkValues.push(
-                getCompositePkValue(this.model.primaryKeys, {
-                  ...prevData[i],
-                  ...data,
-                }),
-              );
-            }
+          if (!oldRecord) {
+            if (throwExceptionIfNotExist) NcError.recordNotFound({ pk, data });
+            continue;
           }
-        } else {
-          await this.prepareNocoData(d, false, cookie, null, { raw });
 
-          const wherePk = await this._wherePk(pkValues, true);
+          await this.prepareNocoData(data, false, cookie, oldRecord);
+          prevData.push(oldRecord);
 
-          toBeUpdated.push({ d, wherePk });
+          const wherePk = await this._wherePk(pk, true);
+          toBeUpdated.push({ d: data, wherePk });
 
           updatePkValues.push(
-            getCompositePkValue(this.model.primaryKeys, {
-              ...pkValues,
-              ...d,
-            }),
+            this.extractPksValues(
+              {
+                ...oldRecord,
+                ...data,
+              },
+              true,
+            ),
           );
         }
       }
@@ -6466,27 +6240,25 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
       }
 
       if (!raw) {
-        const pks = updatePkValues.splice(0, readChunkSize);
+        for (let i = 0; i < updatePkValues.length; i += readChunkSize) {
+          const pksChunk = updatePkValues.slice(i, i + readChunkSize);
 
-        const updatedRecords = await this.list(
-          {
-            pks: pks.join(','),
-          },
-          {
-            limitOverride: readChunkSize,
-          },
-        );
+          const updatedRecords = await this.list(
+            { pks: pksChunk.join(',') },
+            { limitOverride: pksChunk.length },
+          );
 
-        const pkMap = new Map(
-          updatedRecords.map((record) => [
-            getCompositePkValue(this.model.primaryKeys, record),
-            record,
-          ]),
-        );
+          const updatedRecordsMap = new Map(
+            updatedRecords.map((record) => [
+              this.extractPksValues(record, true),
+              record,
+            ]),
+          );
 
-        for (const pk of pks) {
-          if (pkMap.has(pk)) {
-            newData.push(pkMap.get(pk));
+          for (const pk of pksChunk) {
+            if (updatedRecordsMap.has(pk)) {
+              newData.push(updatedRecordsMap.get(pk));
+            }
           }
         }
       }
@@ -6644,7 +6416,12 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
           this.context,
           columns,
         );
-        const filterObj = extractFilterFromXwhere(where, aliasColObjMap, true);
+        const { filters: filterObj } = extractFilterFromXwhere(
+          this.context,
+          where,
+          aliasColObjMap,
+          true,
+        );
 
         const conditionObj = [
           new Filter({
@@ -6790,6 +6567,8 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
         }
       }
 
+      await this.beforeBulkDelete(deleted, this.dbDriver, cookie);
+
       const execQueries: ((
         trx: Knex.Transaction,
         ids: any[],
@@ -6899,7 +6678,12 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
         this.context,
         columns,
       );
-      const filterObj = extractFilterFromXwhere(where, aliasColObjMap, true);
+      const { filters: filterObj } = extractFilterFromXwhere(
+        this.context,
+        where,
+        aliasColObjMap,
+        true,
+      );
 
       await conditionV2(
         this,
@@ -7134,11 +6918,37 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
     return;
   }
 
-  public async beforeInsert(data: any, _trx: any, req): Promise<void> {
+  public async beforeInsert(
+    data: any,
+    _trx: any,
+    req,
+    params?: {
+      allowSystemColumn?: boolean;
+    },
+  ): Promise<void> {
+    const { allowSystemColumn = false } = params || {};
+
+    if (!allowSystemColumn && this.model.synced) {
+      NcError.badRequest('Cannot insert into synced table');
+    }
+
     await this.handleHooks('before.insert', null, data, req);
   }
 
-  public async beforeBulkInsert(data: any, _trx: any, req): Promise<void> {
+  public async beforeBulkInsert(
+    data: any,
+    _trx: any,
+    req,
+    params?: {
+      allowSystemColumn?: boolean;
+    },
+  ): Promise<void> {
+    const { allowSystemColumn = false } = params || {};
+
+    if (!allowSystemColumn && this.model.synced) {
+      NcError.badRequest('Cannot insert into synced table');
+    }
+
     await this.handleHooks('before.bulkInsert', null, data, req);
   }
 
@@ -7165,7 +6975,7 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
     ]);
 
     // disable external source audit in cloud
-    if (!(isEE && !isOnPrem && !(await this.getSource())?.isMeta())) {
+    if (await this.isDataAuditEnabled()) {
       await Audit.insert(
         await generateAuditV1Payload<DataInsertPayload>(
           AuditV1OperationTypes.DATA_INSERT,
@@ -7174,7 +6984,7 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
               ...this.context,
               source_id: this.model.source_id,
               fk_model_id: this.model.id,
-              row_id: id,
+              row_id: this.extractPksValues(id, true),
             },
             details: {
               data: formatDataForAudit(filteredAuditData, this.model.columns),
@@ -7196,10 +7006,7 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
     let parentAuditId;
 
     // disable external source audit in cloud
-    if (
-      !req.ncParentAuditId &&
-      !(isEE && !isOnPrem && !(await this.getSource())?.isMeta())
-    ) {
+    if (!req.ncParentAuditId && (await this.isDataAuditEnabled())) {
       parentAuditId = await Noco.ncMeta.genNanoid(MetaTable.AUDIT);
 
       await Audit.insert(
@@ -7222,7 +7029,7 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
     }
 
     // disable external source audit in cloud
-    if (!(isEE && !isOnPrem && !(await this.getSource())?.isMeta())) {
+    if (await this.isDataAuditEnabled()) {
       // data here is not mapped to column alias
       await Audit.insert(
         await Promise.all(
@@ -7271,7 +7078,7 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
     const id = this.extractPksValues(data);
 
     // disable external source audit in cloud
-    if (!(isEE && !isOnPrem && !(await this.getSource())?.isMeta())) {
+    if (await this.isDataAuditEnabled()) {
       await Audit.insert(
         await generateAuditV1Payload<DataDeletePayload>(
           AuditV1OperationTypes.DATA_DELETE,
@@ -7284,7 +7091,7 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
               ...this.context,
               source_id: this.model.source_id,
               fk_model_id: this.model.id,
-              row_id: id,
+              row_id: this.extractPksValues(id, true),
             },
             req,
           },
@@ -7308,7 +7115,7 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
     const parentAuditId = await Noco.ncMeta.genNanoid(MetaTable.AUDIT);
 
     // disable external source audit in cloud
-    if (!(isEE && !isOnPrem && !(await this.getSource())?.isMeta())) {
+    if (await this.isDataAuditEnabled()) {
       await Audit.insert(
         await generateAuditV1Payload<DataBulkDeletePayload>(
           AuditV1OperationTypes.DATA_BULK_DELETE,
@@ -7330,7 +7137,7 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
     const column_meta = extractColsMetaForAudit(this.model.columns);
 
     // disable external source audit in cloud
-    if (!(isEE && !isOnPrem && !(await this.getSource())?.isMeta())) {
+    if (await this.isDataAuditEnabled()) {
       await Audit.insert(
         await Promise.all(
           data?.map?.((d) =>
@@ -7376,7 +7183,7 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
       const parentAuditId = await Noco.ncMeta.genNanoid(MetaTable.AUDIT);
 
       // disable external source audit in cloud
-      if (!(isEE && !isOnPrem && !(await this.getSource())?.isMeta())) {
+      if (await this.isDataAuditEnabled()) {
         await Audit.insert(
           await generateAuditV1Payload<DataBulkUpdatePayload>(
             AuditV1OperationTypes.DATA_BULK_UPDATE,
@@ -7506,7 +7313,7 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
     }
 
     // disable external source audit in cloud
-    if (!(isEE && !isOnPrem && !(await this.getSource())?.isMeta())) {
+    if (await this.isDataAuditEnabled()) {
       const formattedOldData = formatDataForAudit(oldData, this.model.columns);
       const formattedData = formatDataForAudit(data, this.model.columns);
 
@@ -7562,7 +7369,17 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
   }
 
   public async beforeDelete(data: any, _trx: any, req): Promise<void> {
+    if (this.model.synced) {
+      NcError.badRequest('Cannot delete from synced table');
+    }
+
     await this.handleHooks('before.delete', null, data, req);
+  }
+
+  public async beforeBulkDelete(_data: any, _trx: any, _req): Promise<void> {
+    if (this.model.synced) {
+      NcError.badRequest('Cannot delete from synced table');
+    }
   }
 
   protected async handleHooks(hookName, prevData, newData, req): Promise<void> {
@@ -7584,6 +7401,14 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
 
   // todo: handle composite primary key
   public extractPksValues(data: any, asString = false) {
+    // if data is not object return as it is
+    if (!data || typeof data !== 'object') {
+      if (asString && !ncIsNull(data) && !ncIsUndefined(data)) {
+        return `${data}`;
+      }
+      return data;
+    }
+
     // data can be still inserted without PK
 
     // if composite primary key return an object with all the primary keys
@@ -7598,13 +7423,16 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
             .join('___')
         : pkValues;
     } else if (this.model.primaryKey) {
-      if (typeof data === 'object')
-        return (
+      let pkValue;
+      if (typeof data === 'object') {
+        pkValue =
           data[this.model.primaryKey.title] ??
-          data[this.model.primaryKey.column_name]
-        );
+          data[this.model.primaryKey.column_name];
+      } else {
+        pkValue = data;
+      }
 
-      if (data !== undefined) return asString ? `${data}` : data;
+      if (pkValue !== undefined) return asString ? `${pkValue}` : pkValue;
     } else {
       return 'N/A';
     }
@@ -7615,8 +7443,12 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
   async validate(
     data: Record<string, any>,
     columns?: Column[],
-    { typecast }: { typecast?: boolean } = {
+    {
+      typecast,
+      allowSystemColumn,
+    }: { typecast?: boolean; allowSystemColumn?: boolean } = {
       typecast: false,
+      allowSystemColumn: false,
     },
   ): Promise<boolean> {
     const cols = columns || (await this.model.getColumns(this.context));
@@ -7635,11 +7467,18 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
         }
 
         if (
+          !allowSystemColumn &&
           column.system &&
           ![UITypes.ForeignKey, UITypes.Order].includes(column.uidt)
         ) {
           NcError.badRequest(
             `Column "${column.title}" is system column and cannot be updated`,
+          );
+        }
+
+        if (!allowSystemColumn && column.readonly) {
+          NcError.badRequest(
+            `Column "${column.title}" is readonly column and cannot be updated`,
           );
         }
       }
@@ -7681,12 +7520,12 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
 
       const { func, msg } = validate;
       for (let j = 0; j < func.length; ++j) {
-        const fn =
-          typeof func[j] === 'string'
-            ? customValidators[func[j]]
-              ? customValidators[func[j]]
-              : Validator[func[j]]
-            : func[j];
+        let fn = func[j];
+
+        if (typeof func[j] === 'string') {
+          fn = customValidators[func[j]] ?? Validator[func[j]];
+        }
+
         const columnValue = data?.[cn] || data?.[columnTitle];
         const arg =
           typeof func[j] === 'string' ? columnValue + '' : columnValue;
@@ -7905,7 +7744,7 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
     type: RelationTypes;
   }): Promise<void> {
     // disable external source audit in cloud
-    if (isEE && !isOnPrem && !(await this.getSource())?.isMeta()) {
+    if (!(await this.isDataAuditEnabled())) {
       return;
     }
 
@@ -7941,7 +7780,7 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
             ...this.context,
             source_id: model.source_id,
             fk_model_id: model.id,
-            row_id: rowId as string,
+            row_id: this.extractPksValues(rowId, true) as string,
           },
           details: {
             table_title: model.title,
@@ -8032,7 +7871,7 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
     type: RelationTypes;
   }): Promise<void> {
     // disable external source audit in cloud
-    if (isEE && !isOnPrem && !(await this.getSource())?.isMeta()) {
+    if (!(await this.isDataAuditEnabled())) {
       return;
     }
     if (!refDisplayValue) {
@@ -8067,7 +7906,7 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
             ...this.context,
             source_id: model.source_id,
             fk_model_id: model.id,
-            row_id: rowId as string,
+            row_id: this.extractPksValues(rowId, true) as string,
           },
           details: {
             table_title: model.title,
@@ -8144,7 +7983,11 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
         columns,
       );
       let sorts = extractSortsObject(args?.sort, aliasColObjMap);
-      const filterObj = extractFilterFromXwhere(where, aliasColObjMap);
+      const { filters: filterObj } = extractFilterFromXwhere(
+        this.context,
+        where,
+        aliasColObjMap,
+      );
       // todo: replace with view id
       if (!args.ignoreViewFilterAndSort && this.viewId) {
         await conditionV2(
@@ -8302,7 +8145,11 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
       this.context,
       columns,
     );
-    const filterObj = extractFilterFromXwhere(args.where, aliasColObjMap);
+    const { filters: filterObj } = extractFilterFromXwhere(
+      this.context,
+      args.where,
+      aliasColObjMap,
+    );
     // todo: replace with view id
 
     if (!args.ignoreViewFilterAndSort && this.viewId) {
@@ -9207,6 +9054,7 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
         (c) =>
           c.uidt === UITypes.DateTime ||
           c.uidt === UITypes.Date ||
+          isCreatedOrLastModifiedTimeCol(c) ||
           c.uidt === UITypes.Formula,
       );
       if (dateTimeColumns.length) {
@@ -10387,12 +10235,6 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
                   );
                 }
 
-                if (!/^https?:\/\//i.test(attachment.url)) {
-                  NcError.unprocessableEntity(
-                    `Attachment url '${attachment.url}' is not a valid url`,
-                  );
-                }
-
                 if (attachment.url.length > 8 * 1024) {
                   NcError.unprocessableEntity(
                     `Attachment url '${attachment.url}' is too long`,
@@ -10875,7 +10717,7 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
     req: NcRequest;
   }) {
     // disable external source audit in cloud
-    if (isEE && !isOnPrem && !(await this.getSource())?.isMeta()) return;
+    if (!(await this.isDataAuditEnabled())) return;
 
     const auditUpdateObj = [];
     for (const rowId of rowIds) {
@@ -10912,6 +10754,10 @@ class BaseModelSqlv2 implements IBaseModelSqlV2 {
     req: NcRequest;
   }) {
     // placeholder
+  }
+
+  async isDataAuditEnabled() {
+    return isDataAuditEnabledFn() as boolean;
   }
 
   getViewId() {
@@ -11063,29 +10909,6 @@ function extractIds(
   );
 }
 
-function getRelatedLinksColumn(
-  column: Column<LinkToAnotherRecordColumn>,
-  relatedModel: Model,
-) {
-  return relatedModel.columns.find((c: Column) => {
-    if (column.colOptions?.type === RelationTypes.MANY_TO_MANY) {
-      return (
-        column.colOptions.fk_mm_child_column_id ===
-          c.colOptions?.fk_mm_parent_column_id &&
-        column.colOptions.fk_mm_parent_column_id ===
-          c.colOptions?.fk_mm_child_column_id
-      );
-    } else {
-      return (
-        column.colOptions.fk_child_column_id ===
-          c.colOptions?.fk_child_column_id &&
-        column.colOptions.fk_parent_column_id ===
-          c.colOptions?.fk_parent_column_id
-      );
-    }
-  });
-}
-
 export function formatDataForAudit(
   data: Record<string, unknown>,
   columns: Column[],
@@ -11126,8 +10949,3 @@ export function formatDataForAudit(
 }
 
 export { BaseModelSqlv2 };
-
-// extractIdPropIfObjectOrReturn
-function extractIdPropIfObjectOrReturn(id: any, prop: string) {
-  return typeof id === 'object' ? id[prop] : id;
-}

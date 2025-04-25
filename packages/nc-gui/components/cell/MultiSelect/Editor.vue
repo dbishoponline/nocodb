@@ -44,7 +44,7 @@ const isSurveyForm = inject(IsSurveyFormInj, ref(false))
 const aselect = ref<typeof AntSelect>()
 
 const isOpen = ref(false)
-const canvasSelectCell = inject(CanvasSelectCellInj)
+const canvasSelectCell = inject(CanvasSelectCellInj, null)
 
 const isFocusing = ref(false)
 
@@ -113,6 +113,8 @@ const vModel = computed({
     if (isNewOptionCreateEnabled.value && isOptionMissing.value && val.length && val[val.length - 1] === searchVal.value) {
       return addIfMissingAndSave()
     }
+
+    searchVal.value = ''
     emit('update:modelValue', val.length === 0 ? null : val.join(','))
   },
 })
@@ -321,7 +323,7 @@ watch(
   },
 )
 
-const canvasCellEventData = inject(CanvasCellEventDataInj)!
+const canvasCellEventData = inject(CanvasCellEventDataInj, reactive<CanvasCellEventDataInjType>({}))
 const isUnderLookup = inject(IsUnderLookupInj, ref(false))
 const isCanvasInjected = inject(IsCanvasInjectionInj, false)
 const isExpandedForm = inject(IsExpandedFormOpenInj, ref(false))

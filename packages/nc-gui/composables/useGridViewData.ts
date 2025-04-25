@@ -68,6 +68,7 @@ export function useGridViewData(
     selectedAllRecords,
     loadAggCommentsCount,
     navigateToSiblingRow,
+    getRows,
   } = useInfiniteData({
     meta,
     viewMeta,
@@ -332,7 +333,10 @@ export function useGridViewData(
           const row = cachedRows.value.get(rowIndex)
           if (row) {
             row.rowMeta.saving = false
-            row.row = newRow
+            row.row = {
+              ...row.row,
+              ...newRow,
+            }
             cachedRows.value.set(rowIndex, row)
           }
         }
@@ -771,5 +775,6 @@ export function useGridViewData(
     isBulkOperationInProgress,
     updateRecordOrder,
     selectedAllRecords,
+    getRows,
   }
 }

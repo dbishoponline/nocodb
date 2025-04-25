@@ -136,16 +136,16 @@
     "abort": "中止",
     "saving": "保存中",
     "cancel": "キャンセル",
-    "null": "ヌル",
+    "null": "NULL",
     "escape": "エスケープ",
     "hex": "16進数",
     "clear": "クリア",
-    "slack": "スラック",
+    "slack": "Slack",
     "comment": "コメント",
     "comments": "コメント",
     "microsoftTeams": "マイクロソフトチーム",
-    "discord": "ディスコード",
-    "matterMost": "マターモスト",
+    "discord": "Discord",
+    "matterMost": "Mattermost",
     "twilio": "トゥイリオ",
     "whatsappTwilio": "WhatsApp トゥイリオ",
     "quote": "引用",
@@ -303,13 +303,15 @@
     "extension": "拡張機能",
     "extensions": "拡張機能",
     "enable": "有効にする",
+    "disable": "Disable",
     "poweredBy": "提供元",
     "nocoAI": "Noco AI",
     "you": "あなた",
     "read": "読む",
     "unread": "未読",
     "shared": "共有",
-    "organization": "組織"
+    "organization": "組織",
+    "all": "All"
   },
   "objects": {
     "script": "スクリプト",
@@ -369,7 +371,7 @@
       "orgLevelCreator": "組織レベルのクリエイター",
       "orgLevelViewer": "組織レベルビューワ"
     },
-    "sqlVIew": "SQL ビュー",
+    "sqlView": "SQL ビュー",
     "rowHeight": "レコード高さ",
     "heightClass": {
       "short": "短い",
@@ -496,7 +498,7 @@
       "noAction": "何もしない",
       "cascade": "カスケード",
       "restrict": "制約",
-      "setNull": "nullとする",
+      "setNull": "NULLとする",
       "setDefault": "デフォルトとする"
     }
   },
@@ -507,10 +509,12 @@
     "isNot like": "部分不一致",
     "isEmpty": "が空欄",
     "isNotEmpty": "が空欄でない",
-    "isNull": "がnull",
-    "isNotNull": "がnullでない"
+    "isNull": "がNULL",
+    "isNotNull": "がNULLでない"
   },
   "title": {
+    "confirmSnapshotRestore": "Confirm Snapshot Restore",
+    "urlFilters": "URL Filters",
     "creatingScript": "スクリプトの作成",
     "searchWebhook": "ウェブフックを検索",
     "webcam": "ウェブカメラ",
@@ -603,7 +607,7 @@
     "teamAndSettings": "チームと設定",
     "apiDocs": "API ドキュメント",
     "importFromAirtable": "Airtable からインポート",
-    "importFromNocoDB": "Import From NocoDB",
+    "importFromNocoDB": "NocoDB からインポート",
     "generateToken": "トークンを生成",
     "APIsAndSupport": "APIとサポート",
     "helpCenter": "ヘルプセンター",
@@ -612,7 +616,7 @@
     "quickImportFrom": "クイックインポート元",
     "quickImport": "クイックインポート",
     "quickImportAirtable": "Airtable からインポート",
-    "quickImportNocoDB": "Import from NocoDB",
+    "quickImportNocoDB": "NocoDB からインポート",
     "quickImportCSV": "Import CSV",
     "quickImportExcel": "Import Excel",
     "quickImportJSON": "Import Json",
@@ -676,13 +680,30 @@
     "lockedByUser": "{user} によってロックされています",
     "thisPageDoesNotExist": "このページは存在しません",
     "customUrl": "カスタムURL",
-    "viewSettingsCantBeChangedWhenViewIs": "View settings can't be changed when the view is {type}"
+    "viewSettingsCantBeChangedWhenViewIs": "ビュー設定はビューが{type}の時には変更できません",
+    "youAreLeavingNocoDB": "NocoDBを離れます",
+    "onlyProceedIfYouTrustThisLink": "このリンクを信頼する場合のみ続行してください。",
+    "reAssignViewModalSubtitle": "Once reassigned, current owner will no longer be able to edit the view configuration."
   },
   "labels": {
-    "latitude": "Latitude",
-    "longitude": "Longitude",
-    "failed": "Failed",
-    "succeeded": "Succeeded",
+    "restoringSnapshot": "Restoring Snapshot",
+    "note": "Note:",
+    "snapshotRestoreMessage1": "Restoring this snapshot will not affect the existing base.",
+    "snapshotRestoreMessage2": "On restore, a new base will be created in the selected workspace.",
+    "snapshotRestoreConfirmation": "Are you sure you want to restore this base snapshot.",
+    "tryAgain": "Try again",
+    "goToBase": "Go to Base",
+    "errorMessage": "Error message:",
+    "duplicateBaseBaseTitle": "Duplicate Base \"{baseTitle}\"",
+    "duplicateBaseSuccessfull": "Base Duplication Successfull",
+    "duplicateBaseFailed": "Base Duplication Failed",
+    "duplicateBaseMessage": "You can only duplicate bases into workspaces where you have creator access or above.",
+    "snapshotBaseRestoreMessage": "You can only restore into workspaces where you have creator access or above.",
+    "currentWorkspace": "Current workspace",
+    "latitude": "緯度",
+    "longitude": "経度",
+    "failed": "失敗",
+    "succeeded": "成功",
     "noImage": "画像なし",
     "quickNavigation": "クイックナビゲーション",
     "recent": "最近",
@@ -885,6 +906,7 @@
     "clickToCopyViewID": "クリックしてView IDをコピー",
     "viewMode": "ビュー モード",
     "reAssignView": "ビューを再割り当て",
+    "reAssignThisView": "Re-assign this view",
     "searchUsers": "ユーザーを検索",
     "superAdmin": "スーパ管理者",
     "allTables": "すべてのテーブル",
@@ -965,6 +987,7 @@
     "csv": "CSV",
     "csvFile": "CSVファイル",
     "json": "JSON",
+    "jsonCapitalized": "Json",
     "jsonFile": "JSONファイル",
     "excel": "Excel",
     "microsoftExcel": "Microsoft Excel",
@@ -982,7 +1005,7 @@
     "barcodeFormat": "バーコードのフォーマット",
     "qrCodeValueTooLong": "QRコードにするには文字数が多すぎる",
     "barcodeValueTooLong": "バーコードの文字数が多すぎる",
-    "currentLocation": "Set to current location",
+    "currentLocation": "現在の位置に設定",
     "lng": "経度",
     "lat": "緯度",
     "aggregateFunction": "集約関数",
@@ -1041,12 +1064,12 @@
     "goToDashboard": "ダッシュボードに移動",
     "importing": "インポート中",
     "importingFromAirtable": "Airtableからのインポート",
-    "importingFromNocoDB": "Importing from NocoDB",
+    "importingFromNocoDB": "NocoDBからのインポート",
     "airtableBaseImported": "Airtableベースがインポートされました",
-    "nocoDBBaseImported": "NocoDB Base Imported",
+    "nocoDBBaseImported": "NocoDBプロジェクトがインポートされました",
     "formatJson": "JSONをフォーマット",
     "autoSelectFieldTypes": "フィールドタイプを自動選択",
-    "firstRowAsHeaders": "Use first record as header",
+    "firstRowAsHeaders": "最初のレコードをヘッダーとして使用",
     "flattenNested": "入れ子を平坦化",
     "downloadAllowed": "ダウンロードを許可",
     "weAreHiring": "We are Hiring!",
@@ -1073,8 +1096,11 @@
     "apis": "API",
     "apiSnippet": "APIスニペット",
     "includeData": "データを含む",
-    "includeView": "ビューを含む",
-    "includeWebhook": "Webhookを含む",
+    "includeRecords": "Include records",
+    "baseDuplicateMessage": "Note: Audit logs & integrations will not be duplicated.",
+    "includeView": "Include views",
+    "includeWebhook": "Include webhook",
+    "includeComments": "Include comments",
     "zoomInToViewColumns": "列を表示するにはズームインしてください",
     "embedInSite": "このビューをサイトに埋め込む",
     "titleRequired": "タイトルは必須です。",
@@ -1126,7 +1152,13 @@
     "osBrowser": "OS、ブラウザ",
     "rowId": "行ID",
     "showJsonPayload": "JSONペイロードを表示",
-    "autoCreateMissingSelectionOptions": "Auto create missing select field options"
+    "autoCreateMissingSelectionOptions": "欠落している選択フィールドオプションを自動作成",
+    "fillForm": "フォームを入力",
+    "proceedToLink": "リンクに進む",
+    "currentOwner": "Current owner",
+    "newOwner": "New owner",
+    "addFromUrl": "Add from URL",
+    "enterJson": "Enter JSON"
   },
   "activity": {
     "clickToResolve": "クリックして解決",
@@ -1383,7 +1415,7 @@
       "addOrEditStack": "スタックの追加/編集"
     },
     "map": {
-      "googleMaps": "Google Maps",
+      "googleMaps": "Google マップ",
       "osm": "OSM",
       "mappedBy": "によってマッピング",
       "chooseMappingField": "マッピングフィールドを選択",
@@ -1396,6 +1428,7 @@
     "clearForm": "フォームをクリア",
     "addFieldFromFormView": "フィールドを追加",
     "selectAllFields": "すべてのフィールドを選択",
+    "deselectAllFields": "Deselect all fields",
     "preFilledFields": {
       "title": "入力を有効にする",
       "default": "デフォルト",
@@ -1460,7 +1493,11 @@
     "aiIntegrationReConfigure": "AI統合が削除されました。NocoAI機能を使用するには、フィールド編集モーダルから再設定してください",
     "aiIntegrationAddAndReConfigure": "AI統合が削除されました。NocoAI機能を使用するためにフィールド編集モーダルから再追加および再設定してください",
     "generateFieldDataUsingAiButtonOption": "レコード情報とNocoAIを使用して、このテーブルの複数のフィールドに値を生成します",
-    "sourceDataIsReadonly": "ソースデータは読み取り専用です"
+    "sourceDataIsReadonly": "ソースデータは読み取り専用です",
+    "schemaChangeDisabledFormSqlView": "Schema editing is disabled for this SQL View.",
+    "shiftSpace": "Shift + Space",
+    "expandShiftSpace": "Expand 'Shift + Space'",
+    "selectAllMappedFields": "Select all mapped fields"
   },
   "placeholder": {
     "searchIcons": "アイコンを検索",
@@ -1519,12 +1556,15 @@
     "inviteYourTeam": "チームを招待",
     "inviteYourTeamLabel": "Streamline collaboration and productivity with your team – start by inviting them to join your workspace.",
     "searchOptions": "オプションを検索",
-    "lockViewDescription": "ロックする理由を説明してください。このメッセージは、誰かがこのビューのロックを解除しようとしたときに表示されます（任意）。"
+    "lockViewDescription": "ロックする理由を説明してください。このメッセージは、誰かがこのビューのロックを解除しようとしたときに表示されます（任意）。",
+    "noBaseUsersFound": "No base users found"
   },
   "msg": {
+    "urlFilter": "URL filters are applied from URL parameters and combine with view filters set via the toolbar.",
+    "urlFilterError": "Invalid URL filter. Ignored as it could not be applied.",
     "dropYourDocHere": "ここにドキュメントをドロップしてください",
     "airtableImportSuccess": "Airtableベースから正常にインポートしました。",
-    "nocoDBImportSuccess": "Successfully imported from NocoDB Base.",
+    "nocoDBImportSuccess": "NocoDBプロジェクトから正常にインポートしました。",
     "deleteAccountPermanently": "アカウントを永久に削除する",
     "learnMore": "詳細はこちら",
     "connectIntegrations": "NocoDBで統合を接続します。",
@@ -1593,7 +1633,7 @@
       "columnNotMatchedWithType": "{columnName} は {columnType} と一致しません"
     },
     "selectOption": {
-      "cantBeNull": "選択オプションをnullにすることはできません",
+      "cantBeNull": "選択オプションをNULLにすることはできません",
       "multiSelectCantHaveCommas": "マルチセレクトフィールドにはコンマ(',')を含めることはできません",
       "cantHaveDuplicates": "選択オプションに重複を含めることはできません",
       "createNewOptionNamed": "新しいオプション名を作成する"
@@ -1669,7 +1709,10 @@
         "fieldVisibility": "編集中のフィールドの可視性を変更できません。まず変更を保存するか、破棄してください。",
         "moveEditedField": "編集中のフィールドを移動できません。最初に変更を保存するか破棄してください",
         "moveDeletedField": "削除済みのフィールドを移動できません。最初に変更を保存するか破棄してください"
-      }
+      },
+      "reachedUploadLimit": "Reached upload limit",
+      "youCanOnlyUploadMaxLimitFilesAtATime": "You can only upload {limit} {type} file at a time",
+      "youCanOnlyUploadMaxLimitFilesAtATimePlural": "You can only upload {limit} {type} files at a time"
     },
     "info": {
       "inviteSent": "招待を正常に送信しました",
@@ -1862,7 +1905,8 @@
       "yourCurrentRoleIs": "あなたの現在の役割は",
       "pleaseRequestAccessForView": "この{viewName}にアクセスするには管理者/Baseオーナー/ワークスペースオーナーからより高い権限をリクエストしてください",
       "preventHideAllOptions": "必須フィールドの場合、すべてのオプションを隠すことはできません",
-      "valueMustBeAtMostCharLong": "値は{length}文字以下でなければなりません"
+      "valueMustBeAtMostCharLong": "値は{length}文字以下でなければなりません",
+      "copyToClipboardLocalFileUrl": "Browser doesn’t allow to load local resource directly. URL copied to clipboard instead."
     },
     "error": {
       "manualTriggerHook": "マニュアルフックは無効にできません",
@@ -1969,7 +2013,9 @@
       "columnVisibilityUpdateFailed": "フィールドの表示を更新できませんでした",
       "unsupportedCharacter": "対応していない文字: {char}",
       "unsupportedCharacters": "サポートされていない文字: {char}",
-      "notSupported": "サポートされていません"
+      "notSupported": "サポートされていません",
+      "duplicateTableName": "Duplicate table name",
+      "importError": "Import Error"
     },
     "toast": {
       "exportMetadata": "プロジェクトメタデータは正常にエクスポートされました",
@@ -2019,6 +2065,8 @@
       "embeddableHTMLCodeCopied": "埋め込み用 HTML をコピーしました",
       "userDetailsUpdated": "ユーザーの詳細を更新しました",
       "tableDataImported": "テーブルへデータをインポートしました",
+      "tableImported": "Successfully imported table",
+      "tableImportedPlural": "Successfully imported tables",
       "webhookUpdated": "Webhook の詳細を更新しました",
       "webhookDeleted": "フックの削除に成功",
       "webhookTested": "Webhook のテストに成功しました",

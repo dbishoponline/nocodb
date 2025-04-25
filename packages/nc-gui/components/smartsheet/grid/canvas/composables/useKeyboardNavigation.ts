@@ -51,7 +51,7 @@ export function useKeyboardNavigation({
   onActiveCellChanged: () => void
   handleCellKeyDown: (ctx: { e: KeyboardEvent; row: Row; column: CanvasGridColumn; value: any; pk: any }) => Promise<boolean>
 }) {
-  const { isDataReadOnly, isUIAllowed } = useRoles()
+  const { isDataReadOnly } = useRoles()
   const { $e } = useNuxtApp()
   const meta = inject(MetaInj, ref())
 
@@ -74,12 +74,13 @@ export function useKeyboardNavigation({
     const cmdOrCtrl = isMac() ? e.metaKey : e.ctrlKey
     const altOrOptionKey = e.altKey
 
-    if (e.key === ' ') {
+    if (e.key === ' ' && !e.shiftKey) {
       const isRichModalOpen = isExpandedCellInputExist()
 
-      if (!editEnabled.value && isUIAllowed('dataEdit') && activeCell.value.row !== -1 && !isRichModalOpen) {
+      if (!editEnabled.value && activeCell.value.row !== -1 && !isRichModalOpen) {
         e.preventDefault()
         const row = cachedRows.value.get(activeCell.value.row)
+
         if (!row) return
         expandForm(row)
         return
@@ -166,9 +167,9 @@ export function useKeyboardNavigation({
           e.preventDefault()
           const column = columns.value[activeCell.value.column]
           if (column?.columnObj?.uidt) {
-            if (!NO_EDITABLE_CELL.includes(column.columnObj.uidt)) {
-              selection.value.clear()
+            if (!NO_EDITABLE_CELL.includes(column.columnObj.uidt) && !column.columnObj.readonly) {
               makeCellEditable(activeCell.value.row, columns.value[activeCell.value.column]!)
+              selection.value.clear()
             }
           }
         } else {

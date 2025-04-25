@@ -16,8 +16,8 @@ import { hasAncestorWithClass, isGeneralOverlayActive } from '../../../../utils/
 import { useCanvasTable } from './composables/useCanvasTable'
 import Aggregation from './context/Aggregation.vue'
 import { clearTextCache, defaultOffscreen2DContext, isBoxHovered } from './utils/canvas'
-import Tooltip from './Tooltip.vue'
-import Scroller from './Scroller.vue'
+import Tooltip from './components/Tooltip.vue'
+import Scroller from './components/Scroller.vue'
 import { columnTypeName } from './utils/headerUtils'
 import { MouseClickType, NO_EDITABLE_CELL, getMouseClickType, parseCellWidth } from './utils/cell'
 import { ADD_NEW_COLUMN_WIDTH, COLUMN_HEADER_HEIGHT_IN_PX, MAX_SELECTED_ROWS, ROW_META_COLUMN_WIDTH } from './utils/constants'
@@ -64,6 +64,7 @@ const props = defineProps<{
   chunkStates: Array<'loading' | 'loaded' | undefined>
   isBulkOperationInProgress: boolean
   selectedAllRecords?: boolean
+  getRows: (start: number, end: number) => Promise<Row[]>
 }>()
 
 const emits = defineEmits(['bulkUpdateDlg', 'update:selectedAllRecords'])
@@ -86,6 +87,7 @@ const {
   applySorting,
   bulkDeleteAll,
   removeRowIfNew,
+  getRows,
 } = props
 
 // VModels
@@ -118,7 +120,13 @@ const columnOrder = ref<Pick<ColumnReqType, 'column_order'> | null>(null)
 const isEditColumnDescription = ref(false)
 const mousePosition = reactive({ x: 0, y: 0 })
 const clientMousePosition = reactive({ clientX: 0, clientY: 0 })
-const paddingLessUITypes = new Set([UITypes.LongText, UITypes.DateTime, UITypes.SingleSelect, UITypes.MultiSelect])
+const paddingLessUITypes = new Set([
+  UITypes.LongText,
+  UITypes.DateTime,
+  UITypes.SingleSelect,
+  UITypes.MultiSelect,
+  UITypes.Formula,
+])
 const scroller = ref()
 provide(ClientMousePositionInj, clientMousePosition)
 // provide the column ref since at a time only one column can be active
@@ -132,7 +140,11 @@ const activeCellElement = ref<HTMLElement>()
 
 const cellClickHook = createEventHook()
 
+const cellEventHook = createEventHook()
+
 provide(CellClickHookInj, cellClickHook)
+
+provide(CellEventHookInj, cellEventHook)
 
 provide(CurrentCellInj, activeCellElement)
 
@@ -152,7 +164,7 @@ const { height: windowHeight, width: windowWidth } = useWindowSize()
 const { aggregations, loadViewAggregate } = useViewAggregateOrThrow()
 const { isDataReadOnly, isUIAllowed, isMetaReadOnly } = useRoles()
 const { isMobileMode, isAddNewRecordGridMode, setAddNewRecordGridMode } = useGlobal()
-const { eventBus } = useSmartsheetStoreOrThrow()
+const { eventBus, isSqlView } = useSmartsheetStoreOrThrow()
 const route = useRoute()
 const { $e } = useNuxtApp()
 const { t } = useI18n()
@@ -268,6 +280,7 @@ const {
   onActiveCellChanged,
   addNewColumn: addEmptyColumn,
   setCursor,
+  getRows,
 })
 
 const activeCursor = ref<CursorType>('auto')
@@ -319,7 +332,7 @@ const editEnabledCellPosition = computed(() => {
 const isClamped = computed(() => {
   if (!editEnabled.value || !containerRef.value) return false
 
-  if (editEnabled.value.column?.uidt === UITypes.LongText) {
+  if (editEnabled.value.column?.uidt === UITypes.LongText || editEnabled.value.column?.uidt === UITypes.Formula) {
     return true
   }
 
@@ -403,6 +416,7 @@ function onActiveCellChanged() {
   if (rowSortRequiredRows.value.length) {
     applySorting?.(rowSortRequiredRows.value)
   }
+  calculateSlices()
   requestAnimationFrame(triggerRefreshCanvas)
 }
 
@@ -641,6 +655,11 @@ async function handleMouseDown(e: MouseEvent) {
         }
       })
     } else {
+      if (isContextMenuAllowed.value && vSelectedAllRecords.value) {
+        // Set the context Menu Targer and return
+        contextMenuTarget.value = { row: 0, col: -1 }
+        requestAnimationFrame(triggerRefreshCanvas)
+      }
       return
     }
     // DO NOT TRIGGER ANY OTHER MOUSE_DOWN ACTION IF USER IS CLICKING ON COLUMN HEADER
@@ -702,7 +721,7 @@ async function handleMouseDown(e: MouseEvent) {
     }
 
     if (isContextMenuAllowed.value) {
-      // Set the context Menu Targer and return
+      // Set the context Menu Target and return
       contextMenuTarget.value = { row: rowIndex, col: columnIndex }
       requestAnimationFrame(triggerRefreshCanvas)
     }
@@ -854,7 +873,7 @@ async function handleMouseUp(e: MouseEvent) {
 
       // If user is clicking on an existing column
       const { column: clickedColumn, xOffset } = findClickedColumn(x, scrollLeft.value)
-      const isFieldNotEditable = isLocked.value || !isUIAllowed('fieldEdit')
+      const isFieldNotEditable = !isUIAllowed('fieldEdit') || clickedColumn.columnObj?.readonly
       if (clickedColumn) {
         if (clickType === MouseClickType.RIGHT_CLICK) {
           if (isFieldNotEditable) return
@@ -917,7 +936,7 @@ async function handleMouseUp(e: MouseEvent) {
   }
 
   // If the user is clicking on the Aggregation in bottom
-  if (y > height.value - 36) {
+  if (y > height.value - 36 && !isLocked.value) {
     // If the click is not normal single click, return
     const { column: clickedColumn, xOffset } = findClickedColumn(x, scrollLeft.value)
 
@@ -963,6 +982,7 @@ async function handleMouseUp(e: MouseEvent) {
   } else if (rowIndex > totalRows.value) {
     selection.value.clear()
     activeCell.value = { row: -1, column: -1 }
+    onActiveCellChanged()
     requestAnimationFrame(triggerRefreshCanvas)
     return
   }
@@ -1121,13 +1141,21 @@ const getHeaderTooltipRegions = (
 
     let rightOffset = xOffset + width - rightPadding - (isFieldEditAllowed.value ? 16 : 0)
 
-    if (isFieldEditAllowed.value) {
+    if (isFieldEditAllowed.value && !column.columnObj?.readonly) {
       regions.push({
         x: rightOffset - scrollLeftValue,
         width: 14,
         type: 'columnChevron',
         disableTooltip: true,
         text: null,
+      })
+    } else if (meta.value?.synced && column.columnObj?.readonly) {
+      regions.push({
+        x: rightOffset - scrollLeftValue,
+        width: 14,
+        type: 'synced',
+        disableTooltip: false,
+        text: 'This field is synced',
       })
     }
 
@@ -1435,11 +1463,12 @@ function addEmptyColumn(columnOrderData: Pick<ColumnReqType, 'column_order'> | n
 }
 
 function handleEditColumn(_e: MouseEvent, isDescription = false, column: ColumnType) {
-  if (isLocked.value) return
   if (
     isUIAllowed('fieldEdit') &&
     !isMobileMode.value &&
-    (isDescription ? true : !isMetaReadOnly.value || readonlyMetaAllowedTypes.includes(column.uidt))
+    (isDescription ? true : !isMetaReadOnly.value || readonlyMetaAllowedTypes.includes(column.uidt)) &&
+    !column.readonly &&
+    !isSqlView.value
   ) {
     const rect = canvasRef.value?.getBoundingClientRect()
     if (isDescription) {
@@ -1585,9 +1614,7 @@ watch(rowHeight, () => {
 
 // watch for column hide and re-render canvas
 watch(
-  () => {
-    return columns.value?.length
-  },
+  () => [columns.value?.length, totalRows.value],
   () => {
     nextTick(() => {
       calculateSlices()
@@ -1706,6 +1733,7 @@ onKeyStroke('Escape', () => {
 
 const increaseMinHeightBy: Record<string, number> = {
   [UITypes.LongText]: 2,
+  [UITypes.Formula]: 2,
 }
 
 function updateValue(val: any) {
@@ -1715,6 +1743,19 @@ function updateValue(val: any) {
     editEnabled.value.row.row[title] = val
   }
 }
+
+const isEditableCellVisible = computed(() => !!editEnabled.value?.row)
+
+useActiveKeydownListener(
+  isEditableCellVisible,
+  (event) => {
+    cellEventHook.trigger(event)
+  },
+  {
+    isGridCell: true,
+    immediate: true,
+  },
+)
 
 defineExpose({
   scrollToRow: scrollToCell,
@@ -1795,6 +1836,7 @@ defineExpose({
               :call-add-new-row="callAddNewRow"
               :copy-value="copyValue"
               :read-only="!hasEditPermission"
+              :get-rows="getRows"
               :bulk-update-rows="bulkUpdateRows"
               :expand-form="expandForm"
               :selected-rows="selectedRows"
@@ -1991,9 +2033,12 @@ defineExpose({
 
     :deep(.nc-user-select) {
       margin-top: -2px;
+      .ant-select-selector {
+        @apply !h-7;
+      }
     }
 
-    :deep(.nc-cell-datetime) {
+    :deep(.nc-cell-datetime:not(.nc-under-ltar)) {
       @apply !py-0.75 !px-1.5;
     }
 
@@ -2004,6 +2049,11 @@ defineExpose({
     :deep(.nc-virtual-cell-lookup:has(.nc-cell-attachment)) {
       @apply !h-full;
     }
+  }
+
+  :deep(.nc-virtual-cell-lookup:has(.nc-virtual-cell-linktoanotherrecord)),
+  :deep(.nc-virtual-cell-lookup:has(.nc-virtual-cell-links)) {
+    @apply !overflow-hidden;
   }
 
   :deep(.nc-cell-longtext) {
@@ -2069,13 +2119,13 @@ defineExpose({
     @apply !py-1;
   }
 
-  :deep(.nc-cell-datetime) {
+  :deep(.nc-cell-datetime:not(.nc-under-ltar)) {
     @apply !py-1 !px-2;
   }
 
-  :deep(.nc-cell-date),
-  :deep(.nc-cell-year),
-  :deep(.nc-cell-time) {
+  :deep(.nc-cell-date:not(.nc-under-ltar)),
+  :deep(.nc-cell-year:not(.nc-under-ltar)),
+  :deep(.nc-cell-time:not(.nc-under-ltar)) {
     @apply !h-auto !py-1;
   }
 
@@ -2102,6 +2152,14 @@ defineExpose({
         @apply !text-small leading-[18px];
       }
     }
+  }
+
+  :deep(.nc-cell-datetime.nc-under-ltar) {
+    @apply !py-0 !leading-[16px];
+  }
+
+  :deep(.nc-under-ltar .nc-cell-field div) {
+    @apply !leading-[16px];
   }
 }
 </style>
